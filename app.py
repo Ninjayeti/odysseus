@@ -99,7 +99,7 @@ class _RequestTimeoutMiddleware(_BaseHTTPMiddleware):
             )
 
 
-app.add_middleware(_RequestTimeoutMiddleware)
+# app.add_middleware(_RequestTimeoutMiddleware)  # DISABLED: triggers anyio _deliver_cancellation infinite loop on BaseHTTPMiddleware
 
 # ========= AUTH =========
 from routes.auth_routes import setup_auth_routes, SESSION_COOKIE
@@ -529,6 +529,22 @@ app.include_router(setup_calendar_routes())
 # Shell (user-facing command execution)
 from routes.shell_routes import setup_shell_routes
 app.include_router(setup_shell_routes())
+
+# Terminal (xterm.js-backed live pty sessions)
+from routes.terminal_routes import (
+    TerminalManager, setup_terminal_routes, setup_terminal_ws,
+)
+terminal_manager = TerminalManager()
+app.state.terminal_manager = terminal_manager
+app.include_router(setup_terminal_routes(terminal_manager))
+setup_terminal_ws(
+    app,
+    terminal_manager,
+    auth_manager=auth_manager,
+    session_cookie_name=SESSION_COOKIE,
+    localhost_bypass=LOCALHOST_BYPASS,
+)
+logger.info("Terminal routes + WebSocket registered")
 
 # Cookbook (model download/serve/cache, cookbook state sync)
 from routes.cookbook_routes import setup_cookbook_routes

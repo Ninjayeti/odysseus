@@ -53,13 +53,7 @@ _BUILTIN_SERVERS = {
 }
 
 # NPX-based built-in servers (run via npx, not Python)
-_BUILTIN_NPX_SERVERS = {
-    "builtin_browser": {
-        "name": "Built-in: Browser",
-        "command": "npx",
-        "args": ["-y", "@playwright/mcp@latest", "--headless", "--caps", "vision"],
-    },
-}
+_BUILTIN_NPX_SERVERS = {}  # DISABLED: playwright deps missing in WSL; failed launches caused anyio cancel-scope infinite-retry loop
 
 # Global flag to disable MCP if there are compatibility issues
 MCP_DISABLED = os.environ.get("ODYSSEUS_DISABLE_MCP", "").lower() in ("1", "true", "yes")

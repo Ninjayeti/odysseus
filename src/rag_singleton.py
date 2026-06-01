@@ -17,7 +17,7 @@ def get_rag_manager():
     client is incompatible with the installed pydantic. Return None so personal-
     doc routes fall back to non-vector behavior instead of re-attempting (and
     re-hanging on) a broken ChromaDB init every 30s."""
-    return None
+    return _get_rag_manager_legacy()
 
 
 def _get_rag_manager_legacy():

@@ -190,6 +190,12 @@
   })();
   </script>
   <script defer src="/static/lib/highlight.min.js"></script>
+  <!-- xterm.js (terminal panel) — loaded from CSP-allowed CDN -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/@xterm/addon-canvas@0.7.0/lib/addon-canvas.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/@xterm/addon-unicode11@0.8.0/lib/addon-unicode11.min.js"></script>
   <!-- Inter font — self-hosted, no Google dependencies -->
   <style>
     @font-face { font-family: 'Inter'; font-weight: 400; font-style: normal; font-display: swap; src: url('/static/fonts/Inter-Regular.woff2') format('woff2'); }
@@ -213,7 +219,7 @@
       }, { once: true });
     })();
   </script>
-  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/style.css?v=330">
   <link rel="modulepreload" href="/static/app.js">
   <link rel="modulepreload" href="/static/js/chat.js">
   <link rel="modulepreload" href="/static/js/ui.js">
@@ -240,6 +246,29 @@
     setTimeout(function(){var l=document.getElementById('app-loader');if(l){l.style.opacity='0';setTimeout(function(){l.remove()},300)}},5000);
   })();
   </script>
+  <!-- Terminal Panel — xterm.js attached to /ws/terminal/{session_id}.
+       NOT a modal: this is a fixed full-area overlay that covers the main
+       content (everything except the sidebar). No backdrop, no card, no
+       drag — feels like switching to a panel. Styles in style.css under
+       /* ── Terminal panel ── */. -->
+  <div id="terminal-panel" class="hidden">
+    <div class="terminal-toolbar">
+      <span class="terminal-title">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+        Terminal
+      </span>
+      <span id="terminal-session-info" class="terminal-meta"></span>
+      <span class="terminal-spacer"></span>
+      <select id="terminal-shell-picker" class="terminal-picker" title="Shell for new sessions">
+        <option value="">…</option>
+      </select>
+      <button id="terminal-new-btn" class="terminal-btn" title="New terminal session with selected shell">+ New</button>
+      <button id="terminal-kill-btn" class="terminal-btn terminal-btn-danger" title="Kill this terminal session">Kill</button>
+      <button id="close-terminal-panel" class="terminal-btn-x" aria-label="Close terminal panel" title="Close (Esc)">✕</button>
+    </div>
+    <div id="terminal-container"></div>
+  </div>
+
   <!-- Memory Management Modal -->
   <div id="memory-modal" class="modal hidden">
     <div class="modal-content memory-modal-content" style="background:var(--bg)">
@@ -685,6 +714,10 @@
       <div class="list-item" id="sidebar-search-btn" title="Search conversations (Ctrl+K)">
         <svg class="sidebar-action-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="10" cy="10" r="7"/><path d="M21 21l-4.35-4.35"/></svg>
         <span class="grow" style="position:relative;left:-1px;">Search</span>
+      </div>
+      <div class="list-item" id="sidebar-terminal-btn" title="Open terminal panel">
+        <svg class="sidebar-action-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="position:relative;left:-2px;"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+        <span class="grow" style="position:relative;left:-3px;">Terminal</span>
       </div>
       <!-- Assistant sidebar entry removed — its log + settings live inside
            the Tasks modal (Activity + Settings tabs). The backend
@@ -2217,6 +2250,7 @@
 <script type="module" src="/static/js/admin.js"></script>
 <script type="module" src="/static/js/assistant.js"></script>
 <script type="module" src="/static/app.js"></script>  <!-- app.js must be LAST -->
+<script type="module" src="/static/js/terminal.js"></script>
 <script type="module" src="/static/js/init.js"></script>
 <script nonce="{{CSP_NONCE}}">if('serviceWorker' in navigator){navigator.serviceWorker.register('/static/sw.js').catch(()=>{});}</script>
 </body>

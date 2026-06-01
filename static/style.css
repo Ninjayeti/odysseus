@@ -559,7 +559,11 @@ body.bg-pattern-sparkles {
     #sidebar-search-btn,
     #sidebar-new-chat-btn {
       margin: 0;
-      padding: 8px 8px;
+      /* Keep in sync with the base .list-item padding so every sidebar row
+         starts at the same x. ID specificity beats the .list-item rule, so
+         don't omit this — leaving a divergent value here shifts only these
+         two items relative to the rest of the column. */
+      padding: 9px 8px;
     }
     #sessions-section {
       margin-top: -1px;
@@ -568,7 +572,23 @@ body.bg-pattern-sparkles {
       margin-top: 1px;
     }
     #tools-section .list-item {
-      padding: 8px 8px;
+      padding: 9px 8px;
+    }
+    /* Tool icons in the HTML are inline-sized 14×14 with no class, so the
+       .sidebar-action-icon size bump doesn't reach them. Force them up. */
+    #tools-section .list-item > svg {
+      width: 18px !important;
+      height: 18px !important;
+    }
+    /* Each .list-item in the source has its own hand-tuned `position:relative;
+       left:-Npx` inline nudge on the icon and on the label, all different.
+       That makes the column ragged. Force them all to zero so every row
+       starts at the same x. */
+    .list-item > svg,
+    .list-item .grow,
+    .list-item .sidebar-action-icon,
+    .list-item .section-icon {
+      left: 0 !important;
     }
     .sidebar.right-side .sidebar-header {
       justify-content: flex-start;
@@ -1105,11 +1125,12 @@ body.bg-pattern-sparkles {
 
     /* Section header row — identical sizing to .list-item */
     .section-header-flex {
-      display: flex; align-items: center; gap: 6px;
-      padding: 8px 8px; margin: 1px 0; border-radius: 4px;
+      display: flex; align-items: center; gap: 12px;
+      padding: 9px 8px; margin: 1px 0; border-radius: 6px;
       background: transparent; cursor: pointer;
       transition: background 0.08s;
-      height: 29px;
+      height: auto;
+      min-height: 36px;
       box-sizing: border-box;
     }
     .section-header-flex:hover { background: color-mix(in srgb, var(--red) 8%, transparent); }
@@ -1133,6 +1154,8 @@ body.bg-pattern-sparkles {
       position: relative;
       left: -1px;
       color: var(--accent, var(--red));
+      width: 18px;
+      height: 18px;
     }
     /* Shared notification dot for sidebar section titles. Single source of
        truth so chats / email / assistant / future-section dots all sit at
@@ -1573,14 +1596,14 @@ body.bg-pattern-sparkles {
     .list-item,
     .models-row {
       display: flex;
-      gap: 6px;
+      gap: 12px;
       align-items: center;
-      padding: 3px 8px;
+      padding: 9px 8px;
       margin: 0;
-      border-radius: 4px;
+      border-radius: 6px;
       border: none;
-      line-height: 1;
-      font-size: 13px;
+      line-height: 1.3;
+      font-size: 15px;
       background: transparent;
       transition: background 0.08s;
       cursor: pointer;
@@ -2621,6 +2644,44 @@ body.bg-pattern-sparkles {
       letter-spacing: 0.05em;
       opacity: 0.4;
       padding: 6px 8px 2px;
+    }
+    /* Provider grouping — collapsible per-provider sections inside the model
+       picker. Default collapsed; click header to toggle. Auto-expands while
+       searching (.open class). */
+    .model-picker-list .mp-provider-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 10px;
+      cursor: pointer;
+      border-radius: 4px;
+      user-select: none;
+      transition: background 0.08s;
+    }
+    .model-picker-list .mp-provider-header:hover {
+      background: color-mix(in srgb, var(--fg) 6%, transparent);
+    }
+    .model-picker-list .mp-provider-name {
+      flex: 1;
+      font-size: 0.92em;
+    }
+    .model-picker-list .mp-provider-count {
+      font-size: 0.78em;
+      opacity: 0.45;
+    }
+    .model-picker-list .mp-provider-chev {
+      font-size: 0.8em;
+      opacity: 0.5;
+      transition: transform 0.15s;
+    }
+    .model-picker-list .mp-provider-header.open .mp-provider-chev {
+      transform: rotate(90deg);
+    }
+    .model-picker-list .mp-provider-group.hidden {
+      display: none;
+    }
+    .model-picker-list .mp-provider-group .model-switch-item {
+      padding-left: 22px;
     }
     /* Overflow "+" menu */
     .overflow-wrapper {
@@ -7081,6 +7142,93 @@ button.hamburger {
   padding: 0;
   cursor: pointer;
 }
+
+/* ── Terminal panel ──
+   Full-area overlay sitting to the right of the sidebar. Designed to match
+   Odysseus's dark/minimal aesthetic — no card chrome, no contrasting bar,
+   just a thin border separating the toolbar from the terminal viewport. */
+#terminal-panel {
+  position: fixed;
+  top: 0; right: 0; bottom: 0;
+  left: var(--sidebar-width, 240px);
+  background: var(--bg, #0a0a0a);
+  display: flex;
+  flex-direction: column;
+  z-index: 50;
+}
+#terminal-panel.hidden { display: none; }
+.sidebar.hidden ~ #terminal-panel,
+body.sidebar-collapsed #terminal-panel { left: 0; }
+.terminal-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: transparent;
+  border-bottom: 1px solid var(--border, #222);
+  flex-shrink: 0;
+  font-size: 12px;
+}
+.terminal-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 500;
+  opacity: 0.85;
+}
+.terminal-meta {
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  opacity: 0.45;
+}
+.terminal-spacer { flex: 1; }
+.terminal-picker,
+.terminal-btn {
+  background: transparent;
+  color: inherit;
+  border: 1px solid var(--border, #2a2a2a);
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.1s, border-color 0.1s;
+}
+.terminal-picker:hover,
+.terminal-btn:hover {
+  background: color-mix(in srgb, var(--fg, #fff) 6%, transparent);
+  border-color: color-mix(in srgb, var(--fg, #fff) 25%, transparent);
+}
+.terminal-picker { padding-right: 18px; }
+.terminal-btn-danger:hover {
+  background: color-mix(in srgb, #ff5555 12%, transparent);
+  border-color: color-mix(in srgb, #ff5555 40%, transparent);
+}
+.terminal-btn-x {
+  background: transparent;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  font-size: 14px;
+  opacity: 0.6;
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+.terminal-btn-x:hover {
+  opacity: 1;
+  background: color-mix(in srgb, var(--fg, #fff) 8%, transparent);
+}
+#terminal-container {
+  flex: 1;
+  min-height: 0;
+  padding: 4px 6px 0;
+  background: #000;
+  overflow: hidden;
+}
+/* Make xterm fill its container — fitAddon handles the cell math but the
+   .xterm wrapper itself needs height:100% to give it room to measure. */
+#terminal-container .xterm,
+#terminal-container .xterm-viewport,
+#terminal-container .xterm-screen { height: 100% !important; }
 
 /* ============================================ */
 /* HEADER SIZING FOR CHAT MESSAGES */

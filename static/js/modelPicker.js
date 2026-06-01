@@ -145,7 +145,7 @@ function _initModelPickerDropdown() {
       el.textContent = label;
       listEl.appendChild(el);
     }
-    function _addRow(m) {
+    function _addRow(m, container) {
       const row = document.createElement('div');
       row.className = 'model-switch-item';
       if (m.stale) {
@@ -178,21 +178,64 @@ function _initModelPickerDropdown() {
       epSpan.textContent = _epDisplay;
       row.appendChild(epSpan);
       row.addEventListener('click', () => _pick(m));
-      listEl.appendChild(row);
+      (container || listEl).appendChild(row);
     }
 
+    // Render favorites flat at the top (the "common case" path — one click).
     if (favModels.length > 0) {
       _addSection('Favorites');
-      favModels.forEach(_addRow);
+      favModels.forEach(m => _addRow(m, listEl));
     }
-    if (restModels.length > 0) {
-      if (favModels.length > 0) _addSection('All models');
-      restModels.forEach(_addRow);
-    }
+
+    // Group the rest by provider. For slash-prefixed IDs (OpenRouter style:
+    // `anthropic/claude-...`, `openai/gpt-...`) the prefix is the provider;
+    // for everything else fall back to the endpoint name. This avoids any
+    // hand-curated provider list — the grouping is purely derived from data
+    // the endpoint already returns.
+    const groups = new Map();
+    restModels.forEach(m => {
+      const provider = m.mid.includes('/')
+        ? m.mid.split('/')[0]
+        : (m.epName || 'Other').split('/').pop();
+      if (!groups.has(provider)) groups.set(provider, []);
+      groups.get(provider).push(m);
+    });
+
+    // Each provider becomes a collapsible section. Default-collapsed when
+    // there's no search query (browse-by-brand discovery), auto-expanded
+    // when filtering so matching results are always visible. Sort
+    // alphabetically — the upstream catalog order is arbitrary and counts-
+    // based sort just rewards bulk-publishers like Qwen over recognizable
+    // brands like Anthropic, hurting findability.
+    const sorted = [...groups.entries()].sort((a, b) =>
+      a[0].localeCompare(b[0], undefined, { sensitivity: 'base' })
+    );
+    sorted.forEach(([provider, models]) => {
+      const header = document.createElement('div');
+      header.className = 'mp-provider-header';
+      // Title-case bare lowercase IDs like 'anthropic' → 'Anthropic'; leave
+      // mixed-case ones like 'xAI Grok' alone.
+      const label = /^[a-z]+$/.test(provider)
+        ? provider[0].toUpperCase() + provider.slice(1)
+        : provider;
+      header.innerHTML = `<span class="mp-provider-name">${label}</span><span class="mp-provider-count">${models.length}</span><span class="mp-provider-chev">▸</span>`;
+      const group = document.createElement('div');
+      group.className = 'mp-provider-group';
+      if (!q) group.classList.add('hidden');
+      else header.classList.add('open');
+      models.forEach(m => _addRow(m, group));
+      header.addEventListener('click', () => {
+        group.classList.toggle('hidden');
+        header.classList.toggle('open');
+      });
+      listEl.appendChild(header);
+      listEl.appendChild(group);
+    });
+
     if (listEl.children.length === 0) {
       const empty = document.createElement('div');
       empty.className = 'model-switch-empty';
-      empty.textContent = 'No models available';
+      empty.textContent = q ? 'No matches' : 'No models available';
       listEl.appendChild(empty);
     }
   }
