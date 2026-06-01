@@ -668,6 +668,12 @@ app.include_router(setup_note_routes(task_scheduler))
 from routes.email_routes import setup_email_routes
 app.include_router(setup_email_routes())
 
+# GitHub integration — PAT setup, briefing editor, permission flags.
+# Read/write tools live in mcp_servers/github_server.py (auto-registered
+# via _BUILTIN_SERVERS in src/builtin_mcp.py).
+from routes.github_routes import setup_github_routes
+app.include_router(setup_github_routes(mcp_manager=mcp_manager))
+
 from routes.vault_routes import setup_vault_routes
 app.include_router(setup_vault_routes())
 

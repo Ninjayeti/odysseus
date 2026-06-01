@@ -96,6 +96,29 @@ def _clear_orphaned_session_endpoint(sess) -> bool:
         db.close()
 
 
+def _fetch_github_briefing(owner: str | None) -> str | None:
+    """Return the user's GitHub briefing text if the integration is set up
+    AND enabled, otherwise None. Cheap DB hit per chat turn; safe to call
+    unconditionally — the caller decides whether to inject based on the
+    `allow_github` form flag.
+
+    Failures (missing table on a fresh install, DB error, etc.) silently
+    return None so the chat path never breaks because of GitHub setup
+    state."""
+    try:
+        from core.database import SessionLocal as _SL, GitHubIntegration as _GI
+    except Exception:
+        return None
+    try:
+        with _SL() as db:
+            row = db.query(_GI).filter_by(owner=owner or "").first()
+        if not row or not row.enabled or not row.briefing:
+            return None
+        return row.briefing
+    except Exception:
+        return None
+
+
 def setup_chat_routes(
     session_manager,
     chat_handler,
@@ -232,6 +255,13 @@ def setup_chat_routes(
         preset_id = form_data.get("preset_id")
         allow_bash = form_data.get("allow_bash")
         allow_web_search = form_data.get("allow_web_search")
+        # GitHub integration toggles — see the GitHub icon in the chat input
+        # overflow menu. `allow_github` gates the read tools, `allow_github_write`
+        # additionally gates the write tools (post comment, open PR, etc.).
+        # When `allow_github` is true the briefing is appended to the system
+        # prompt; see the briefing-injection block further down.
+        allow_github = form_data.get("allow_github")
+        allow_github_write = form_data.get("allow_github_write")
         use_rag = form_data.get("use_rag")
         search_context = form_data.get("search_context")  # pre-fetched web search results (compare mode)
         compare_mode = str(form_data.get("compare_mode", "")).lower() == "true"
@@ -313,6 +343,16 @@ def setup_chat_routes(
 
         no_memory = str(form_data.get("no_memory", "")).lower() == "true"
 
+        # GitHub briefing: when the user has the GitHub toggle on for this
+        # turn, append their saved briefing to the agent's system prompt.
+        # Only loaded when allow_github is set so chats without GitHub
+        # in play don't pay the token cost.
+        _extra_prompts: list[str] = []
+        if str(allow_github).lower() == "true":
+            _brief = _fetch_github_briefing(getattr(sess, "owner", None) or "")
+            if _brief:
+                _extra_prompts.append(_brief)
+
         # Build shared context (stream path uses enhanced_message for context preface)
         ctx = await build_chat_context(
             sess, request, chat_handler, chat_processor,
@@ -333,6 +373,7 @@ def setup_chat_routes(
             # manage_skills (agent mode). In plain chat or incognito the
             # index would be useless / unwanted noise.
             agent_mode=(chat_mode == "agent"),
+            extra_system_prompts=_extra_prompts or None,
         )
 
         _research_flags = {"do": do_research}  # Mutable container for generator scope
@@ -390,6 +431,23 @@ def setup_chat_routes(
         if str(allow_web_search).lower() != "true":
             disabled_tools.add("web_search")
             disabled_tools.add("web_fetch")
+        # GitHub: gate the entire gh_* tool family on `allow_github`. The
+        # MCP server exposes only read tools today, but list them explicitly
+        # so write tools added later (gh_post_*, gh_open_*, gh_push_*)
+        # require `allow_github_write` separately without further wiring.
+        _gh_read_tools = {
+            "gh_me", "gh_list_my_prs", "gh_get_pr", "gh_get_pr_diff",
+            "gh_list_pr_comments", "gh_search_issues", "gh_get_notifications",
+        }
+        _gh_write_tools = {
+            "gh_post_pr_comment", "gh_post_issue_comment",
+            "gh_open_pr", "gh_edit_pr", "gh_close_issue",
+            "gh_push_commits", "gh_mark_notification_read",
+        }
+        if str(allow_github).lower() != "true":
+            disabled_tools.update(_gh_read_tools | _gh_write_tools)
+        elif str(allow_github_write).lower() != "true":
+            disabled_tools.update(_gh_write_tools)
 
         # Nobody/incognito mode: deny tools that would expose the user's
         # persistent memory, past chats, or other identity-linked data.

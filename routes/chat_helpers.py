@@ -354,6 +354,7 @@ async def build_chat_context(
     webhook_manager=None,
     use_enhanced_message: bool = False,
     agent_mode: bool = False,
+    extra_system_prompts: list[str] | None = None,
 ) -> ChatContext:
     """Build the full context (preface + messages) for an LLM call.
 
@@ -421,6 +422,8 @@ async def build_chat_context(
     )
     if use_rag is not None:
         _preface_kwargs["use_rag"] = use_rag_val
+    if extra_system_prompts:
+        _preface_kwargs["extra_system_prompts"] = extra_system_prompts
     preface, rag_sources, web_sources = chat_processor.build_context_preface(**_preface_kwargs)
 
     # Capture used memories immediately

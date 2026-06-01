@@ -170,6 +170,7 @@ class ChatProcessor:
         agent_mode: bool = False,
         incognito: bool = False,
         use_skills: bool = True,
+        extra_system_prompts: Optional[List[str]] = None,
     ) -> Tuple[List[Dict[str, str]], List[Dict[str, Any]], List[Dict[str, str]]]:
         """Build the context preface for LLM calls.
 
@@ -185,6 +186,16 @@ class ChatProcessor:
                 "role": "system",
                 "content": preset_system_prompt
             })
+        # Extra system prompts from callers (e.g. the GitHub integration's
+        # briefing when the user has the GitHub toggle on for this turn).
+        # Appended before the untrusted-context policy so policy rules
+        # always have the final word on what the model trusts.
+        for _extra in (extra_system_prompts or []):
+            if _extra:
+                preface.append({
+                    "role": "system",
+                    "content": _extra,
+                })
         preface.append({
             "role": "system",
             "content": UNTRUSTED_CONTEXT_POLICY,

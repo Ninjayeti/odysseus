@@ -628,6 +628,34 @@ class Memory(Base):
         Index('ix_memories_session', 'session_id', 'timestamp'),  # Composite for session-based queries
     )
 
+
+class GitHubIntegration(Base):
+    """Per-user GitHub integration.
+
+    Owner is the Odysseus username (one row per user). PAT is stored
+    encrypted at rest via secret_storage.encrypt(); decryption happens
+    inside the github MCP server when it builds the auth header.
+
+    `briefing` holds the system-prompt addendum that gets appended to
+    the agent's context when the user toggles GitHub on for a turn.
+    Ships seeded with a sensible default; user-editable from Settings.
+
+    `enabled` is the user-level kill switch; `write_enabled` gates the
+    write-tier MCP tools (post comments, open PRs, push). Read tools
+    are always available when `enabled` is true.
+    """
+    __tablename__ = "github_integrations"
+
+    owner = Column(String, primary_key=True, index=True)
+    pat_encrypted = Column(Text, nullable=False)
+    github_username = Column(String, nullable=True)
+    briefing = Column(Text, nullable=True)
+    enabled = Column(Boolean, default=True, nullable=False)
+    write_enabled = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
 def _migrate_add_last_message_at_column():
     """Add last_message_at to sessions + backfill from the latest message
     timestamp per session (fallback to last_accessed / created_at when a
