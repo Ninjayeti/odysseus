@@ -7607,6 +7607,25 @@ body.sidebar-collapsed #terminal-panel { left: 0; }
   font-size: 11px;
   opacity: 0.45;
 }
+/* GitHub-auth indicator in the terminal toolbar. Lit pill with the user's
+   GitHub handle when integration is configured + enabled — gh CLI just
+   works inside this terminal. Clicking opens Settings → GitHub. */
+.terminal-gh-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  background: color-mix(in srgb, var(--accent, var(--red)) 14%, transparent);
+  color: var(--accent, var(--red));
+  border: 1px solid color-mix(in srgb, var(--accent, var(--red)) 35%, transparent);
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.terminal-gh-indicator:hover {
+  background: color-mix(in srgb, var(--accent, var(--red)) 20%, transparent);
+}
 .terminal-spacer { flex: 1; }
 .terminal-picker,
 .terminal-btn {

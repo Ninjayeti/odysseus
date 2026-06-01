@@ -219,7 +219,7 @@
       }, { once: true });
     })();
   </script>
-  <link rel="stylesheet" href="/static/style.css?v=343">
+  <link rel="stylesheet" href="/static/style.css?v=345">
   <link rel="modulepreload" href="/static/app.js">
   <link rel="modulepreload" href="/static/js/chat.js">
   <link rel="modulepreload" href="/static/js/ui.js">
@@ -258,6 +258,15 @@
         Terminal
       </span>
       <span id="terminal-session-info" class="terminal-meta"></span>
+      <!-- GitHub indicator: lit when the user has GitHub integration enabled.
+           Confirms that gh CLI / git push will authenticate as their account
+           inside this terminal (GH_TOKEN + GITHUB_TOKEN env are auto-injected
+           in routes/terminal_routes.py:spawn). Hidden when no integration.
+           Click → opens Settings → GitHub tab. -->
+      <button type="button" id="terminal-gh-indicator" class="terminal-gh-indicator" title="GitHub auth is live in this terminal" style="display:none">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>
+        <span id="terminal-gh-indicator-name"></span>
+      </button>
       <span class="terminal-spacer"></span>
       <select id="terminal-shell-picker" class="terminal-picker" title="Shell for new sessions">
         <option value="">…</option>

@@ -43,6 +43,40 @@ DEFAULT_ROWS = 30
 READ_CHUNK = 4096
 
 
+def _github_env_for(owner: str | None) -> dict | None:
+    """Return env-var overrides for a new pty if the user has GitHub
+    integration set up + enabled. Specifically: GITHUB_TOKEN (the canonical
+    var `gh` CLI and most github-aware tools read) sourced from the
+    decrypted PAT in github_integrations. Returns None on any failure so
+    terminal spawn never breaks because of GitHub setup state.
+
+    The cleartext token only ever lives inside the spawned subprocess's
+    env block — never written to disk, never echoed in logs."""
+    if not owner:
+        return None
+    try:
+        from core.database import SessionLocal as _SL, GitHubIntegration as _GI
+        from src.secret_storage import decrypt as _decrypt
+    except Exception:
+        return None
+    try:
+        with _SL() as db:
+            row = db.query(_GI).filter_by(owner=owner).first()
+        if not row or not row.enabled or not row.pat_encrypted:
+            return None
+        pat = row.pat_encrypted
+        if pat.startswith("enc:"):
+            pat = _decrypt(pat)
+        if not pat:
+            return None
+        # GH_TOKEN is the modern `gh` CLI preferred env, GITHUB_TOKEN is the
+        # broader fallback. Set both so anything in the GitHub ecosystem
+        # picks one up.
+        return {"GH_TOKEN": pat, "GITHUB_TOKEN": pat}
+    except Exception:
+        return None
+
+
 @dataclass
 class TerminalSession:
     """One pty session — owns the master fd, the child pid, and metadata."""
@@ -333,8 +367,17 @@ def setup_terminal_routes(manager: TerminalManager) -> APIRouter:
         cwd = body.get("cwd")
         cols = int(body.get("cols") or DEFAULT_COLS)
         rows = int(body.get("rows") or DEFAULT_ROWS)
+        # If the user has GitHub integration configured + enabled, surface the
+        # PAT to the shell via GITHUB_TOKEN. That's the env var `gh` CLI reads
+        # automatically (and the standard for most github-aware tooling), so
+        # `gh pr list` etc. just work inside the terminal without any
+        # explicit auth step. Decrypts the encrypted PAT on demand; the
+        # cleartext only exists in the pty subprocess's env, never written
+        # to disk or echoed in our logs.
+        env_overrides = _github_env_for(user)
         sess = await manager.spawn(
-            owner=user, shell=shell, cwd=cwd, cols=cols, rows=rows
+            owner=user, shell=shell, cwd=cwd, cols=cols, rows=rows,
+            env_overrides=env_overrides,
         )
         return {
             "session_id": sess.session_id,

@@ -201,6 +201,27 @@ function attachWebSocket(sessionId) {
   };
 }
 
+async function _syncGitHubIndicator() {
+  const el = document.getElementById('terminal-gh-indicator');
+  const nameEl = document.getElementById('terminal-gh-indicator-name');
+  if (!el) return;
+  try {
+    const r = await fetch('/api/github/integration', { credentials: 'same-origin' });
+    if (!r.ok) { el.style.display = 'none'; return; }
+    const info = await r.json();
+    if (info && info.configured) {
+      el.style.display = '';
+      if (nameEl) nameEl.textContent = info.github_username || '';
+      el.title = `gh CLI is authenticated as ${info.github_username || 'you'} in this terminal`;
+      el.onclick = () => {
+        try { if (window.settingsModule) window.settingsModule.open('github'); } catch {}
+      };
+    } else {
+      el.style.display = 'none';
+    }
+  } catch { el.style.display = 'none'; }
+}
+
 async function openTerminal() {
   const panel = $('terminal-panel');
   if (!panel) return;
@@ -220,6 +241,8 @@ async function openTerminal() {
   ensureTerm();
   // Trigger several fits to handle layout / font load races.
   fitSoon();
+  // Refresh GitHub indicator each open — user may have just configured.
+  _syncGitHubIndicator();
 
   // Make sure the shells list is loaded before we try to spawn — otherwise
   // the user's pref (e.g. pwsh) silently falls back to default bash.
@@ -332,6 +355,30 @@ function wireUp() {
     const modal = $('terminal-panel');
     if (modal && !modal.classList.contains('hidden')) fitNow();
   });
+
+  // Bug fix: terminal panel is a fixed-position overlay (vs being a real
+  // tab/page swap). That means clicking another sidebar nav item — New Chat,
+  // Brain, Tasks, etc. — doesn't visually do anything while the terminal is
+  // open, because the click triggers the target view's logic but the terminal
+  // is still floating on top. Workaround: any click on a sidebar nav item
+  // other than the Terminal button itself closes the terminal panel first,
+  // so the target view becomes visible.
+  // Proper architectural fix (terminal as a true page) lives in the
+  // side-by-side/4-pane rewrite — until then this handles the common case.
+  document.addEventListener('click', (e) => {
+    const panel = $('terminal-panel');
+    if (!panel || panel.classList.contains('hidden')) return;
+    // Match any sidebar nav item (top-level new-chat, search, terminal,
+    // email, plus the tool-section children like Brain / Tasks / Theme).
+    const navItem = e.target.closest(
+      '#sidebar-new-chat-btn, #sidebar-search-btn, #sidebar-terminal-btn, ' +
+      '#sidebar-brand-btn, #email-section-title, ' +
+      '#tools-section .list-item'
+    );
+    if (!navItem) return;
+    if (navItem.id === 'sidebar-terminal-btn') return;  // re-click handled separately
+    closeTerminal();
+  }, true);  // capture phase so we run before the target's own handler
 }
 
 if (document.readyState === 'loading') {
