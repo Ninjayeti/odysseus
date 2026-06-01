@@ -2136,6 +2136,20 @@ async function initGitHubIntegration() {
   const patIn = el('gh-intg-pat');
   const patBtn = el('gh-intg-save');
   const patMsg = el('gh-intg-pat-msg');
+  const generateLink = el('gh-intg-generate-link');
+  // Pre-fill GitHub's classic-token creation URL with the scopes Odysseus
+  // needs (repo for read+write on the user's own PRs/issues/diffs;
+  // notifications so the agent can see what's new). User just clicks
+  // "Generate token" at the bottom of the page they land on — no scope
+  // hunting. We use classic over fine-grained because classic tokens
+  // accept the scope list via URL param; fine-grained does not yet.
+  if (generateLink) {
+    const _params = new URLSearchParams({
+      description: 'Odysseus (https://github.com/pewdiepie-archdaemon/odysseus)',
+      scopes: 'repo,notifications',
+    });
+    generateLink.href = `https://github.com/settings/tokens/new?${_params.toString()}`;
+  }
   const writeSw = el('gh-intg-write');
   const briefingTa = el('gh-intg-briefing');
   const briefingSave = el('gh-intg-briefing-save');

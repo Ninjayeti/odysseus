@@ -219,7 +219,7 @@
       }, { once: true });
     })();
   </script>
-  <link rel="stylesheet" href="/static/style.css?v=335">
+  <link rel="stylesheet" href="/static/style.css?v=336">
   <link rel="modulepreload" href="/static/app.js">
   <link rel="modulepreload" href="/static/js/chat.js">
   <link rel="modulepreload" href="/static/js/ui.js">
@@ -2189,20 +2189,42 @@
               <span id="gh-intg-status" style="font-size:11px;font-weight:400;opacity:0.55;margin-left:8px"></span>
             </h2>
             <div class="admin-toggle-sub" style="margin-bottom:10px">
-              Lets the agent read your PRs, search issues, and review diffs when you toggle the GitHub icon on in the chat input. Add a Personal Access Token to get started — repo scope for reads is enough; PRs + repo scopes if you also want write actions.
+              Lets the agent read your PRs, search issues, and review diffs when you toggle the GitHub icon on in the chat input.
             </div>
 
-            <!-- PAT input form (always shown; replaces existing PAT on save) -->
-            <div class="gh-intg-section">
-              <label class="gh-intg-label">Personal Access Token</label>
-              <div class="gh-intg-pat-row">
-                <input type="password" id="gh-intg-pat" placeholder="ghp_..." autocomplete="off">
-                <button type="button" class="admin-btn-sm" id="gh-intg-save">Save</button>
-              </div>
-              <div class="gh-intg-msg" id="gh-intg-pat-msg"></div>
-              <div class="gh-intg-hint">
-                Generate at <a href="https://github.com/settings/tokens?type=beta" target="_blank" rel="noopener">github.com/settings/tokens</a> — fine-grained tokens preferred. Repo permissions: Read for browsing PRs/issues; Read & Write if you also want the agent to comment / open PRs.
-              </div>
+            <!-- Guided setup: explains what a PAT is and gives a one-click
+                 link that opens GitHub's token-creation page with the right
+                 permissions pre-selected. Two-step UX for users who've
+                 never made a PAT: click Generate, then paste. -->
+            <div class="gh-intg-setup" id="gh-intg-setup">
+              <ol class="gh-intg-steps">
+                <li>
+                  <span class="gh-intg-step-num">1</span>
+                  <div class="gh-intg-step-body">
+                    <div class="gh-intg-step-head">Generate a token on GitHub</div>
+                    <div class="gh-intg-step-desc">Opens GitHub with the right permissions pre-filled. Click <b>Generate token</b> at the bottom of the page, then copy the token it shows you.</div>
+                    <a class="gh-intg-cta" id="gh-intg-generate-link" href="#" target="_blank" rel="noopener">
+                      Open GitHub →
+                    </a>
+                  </div>
+                </li>
+                <li>
+                  <span class="gh-intg-step-num">2</span>
+                  <div class="gh-intg-step-body">
+                    <div class="gh-intg-step-head">Paste it here</div>
+                    <div class="gh-intg-step-desc">The token starts with <code>github_pat_</code> (fine-grained) or <code>ghp_</code> (classic). Both work.</div>
+                    <div class="gh-intg-pat-row">
+                      <input type="password" id="gh-intg-pat" placeholder="github_pat_..." autocomplete="off">
+                      <button type="button" class="admin-btn-sm" id="gh-intg-save">Save</button>
+                    </div>
+                    <div class="gh-intg-msg" id="gh-intg-pat-msg"></div>
+                  </div>
+                </li>
+              </ol>
+              <details class="gh-intg-faq">
+                <summary>What's a Personal Access Token?</summary>
+                <p>A PAT is a long password GitHub generates that lets other apps act as you. Unlike your real password, you can give it limited permissions (read-only, specific repos) and revoke it any time from github.com without changing your real password. The token Odysseus uses by default has read-only access to your pull requests, issues, and file contents.</p>
+              </details>
             </div>
 
             <!-- Write actions toggle. Only useful once a PAT is saved. -->
