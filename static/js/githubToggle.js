@@ -1,20 +1,21 @@
-/* GitHub integration — chat-input toggle + popover.
+/* GitHub integration — chat-input toggle.
  *
- * Click the GitHub icon in the chat input → popover opens. Popover has:
- *   - "Enable for this chat" switch (mirrors #gh-toggle hidden checkbox)
- *   - "Allow write actions" switch (mirrors #gh-toggle-write, greyed when above is off)
- *   - "Configure in Settings" link → opens Settings → Integrations
- * If no integration is configured, popover shows an empty state with a
- * "Set up GitHub" CTA that opens Settings directly.
+ * Single-click toggle (same pattern as web-toggle-btn / bash-toggle-btn).
+ * Hidden until the user has a PAT configured in Settings -> Integrations;
+ * shows automatically once the integration is set up.
  *
- * The hidden checkboxes are what chat.js submits to /api/chat_stream; the
- * popover is just the UI for editing them.
+ * Write actions are configured in Settings (a separate `write_enabled`
+ * flag) — not per-conversation here. This button only controls READ access
+ * for the current chat. When ON, chat.js sends `allow_github=true` AND
+ * `allow_github_write=true` (the latter sourced from the server-side
+ * integration row), so the chat-input toggle is a single "do GitHub now"
+ * switch and Settings is the one place to grant write privilege.
  */
 
-const TOGGLE_KEY = 'odysseus-gh-toggle';        // per-browser persistence of read-toggle state
-const WRITE_KEY = 'odysseus-gh-toggle-write';   // ditto for write-toggle
+const TOGGLE_KEY = 'odysseus-gh-toggle';  // persisted toggle state across reloads
 
-let _integration = null;  // cached integration metadata, refreshed on popover open
+let _writeEnabled = false;  // mirrors the server-side write_enabled flag
+let _configured = false;     // mirrors `configured` from /api/github/integration
 
 function $(id) { return document.getElementById(id); }
 
@@ -26,215 +27,59 @@ async function _fetchIntegration() {
   } catch { return null; }
 }
 
-function _loadToggle(key, dflt = false) {
-  try {
-    const v = localStorage.getItem(key);
-    return v === null ? dflt : v === 'true';
-  } catch { return dflt; }
+function _loadToggle() {
+  try { return localStorage.getItem(TOGGLE_KEY) === 'true'; } catch { return false; }
 }
-function _saveToggle(key, val) {
-  try { localStorage.setItem(key, String(!!val)); } catch {}
+function _saveToggle(val) {
+  try { localStorage.setItem(TOGGLE_KEY, String(!!val)); } catch {}
 }
 
-/** Sync the hidden #gh-toggle checkbox + the button's active class to a boolean. */
-function _setReadEnabled(on) {
+/** Sync hidden checkbox + button state. */
+function _setEnabled(on) {
   const chk = $('gh-toggle');
-  const btn = $('gh-toggle-btn');
-  if (chk) chk.checked = !!on;
-  if (btn) btn.classList.toggle('active', !!on);
-  _saveToggle(TOGGLE_KEY, on);
-}
-
-function _setWriteEnabled(on) {
-  const chk = $('gh-toggle-write');
-  if (chk) chk.checked = !!on;
-  _saveToggle(WRITE_KEY, on);
-}
-
-/** Reflect the current state into the popover switches. */
-function _syncPopoverFromState() {
-  const enableSwitch = $('gh-popover-enable');
-  const writeSwitch = $('gh-popover-write');
-  const readChk = $('gh-toggle');
   const writeChk = $('gh-toggle-write');
-  if (enableSwitch && readChk) enableSwitch.checked = readChk.checked;
-  if (writeSwitch && writeChk) writeSwitch.checked = writeChk.checked;
-  // Write switch is greyed out when read is off — write without read is
-  // meaningless (the agent can't act on something it can't see).
-  const writeRow = $('gh-popover-row-write');
-  if (writeRow) {
-    const dim = !(readChk && readChk.checked);
-    writeRow.classList.toggle('disabled', dim);
-    if (writeSwitch) writeSwitch.disabled = dim;
-  }
+  const btn = $('gh-toggle-btn');
+  if (chk) chk.checked = !!on;
+  // The write flag rides with the read toggle — server's write_enabled gates
+  // it, but when GitHub is OFF for the chat there's nothing to write anyway,
+  // so we set the form-field checkbox only when both apply.
+  if (writeChk) writeChk.checked = !!on && _writeEnabled;
+  if (btn) btn.classList.toggle('active', !!on);
+  _saveToggle(on);
 }
 
-/** Show or hide the entire chat-input button based on whether the user has
- * configured the integration. Pre-config the button isn't useful — there's
- * nothing it can toggle on — so hiding it avoids cluttering the toolbar
- * for users who haven't set up GitHub. Surfaces once a PAT lands. */
 function _setButtonVisibility(visible) {
-  const wrap = $('gh-toggle-wrap');
-  if (wrap) wrap.style.display = visible ? '' : 'none';
-}
-
-/** Show the configured / empty state appropriately. */
-function _renderPopover(integration) {
-  const status = $('gh-popover-status');
-  const body = $('gh-popover-body');
-  const empty = $('gh-popover-empty');
-  if (!body || !empty || !status) return;
-  if (integration && integration.configured) {
-    _setButtonVisibility(true);
-    body.classList.remove('hidden');
-    empty.classList.add('hidden');
-    // Plain username, no leading @. Some monospace-y fonts render @ at
-    // small sizes as a glyph that reads as a stray icon next to the name.
-    status.textContent = integration.github_username || '?';
-    status.classList.remove('gh-status-empty');
-  } else {
-    // No PAT yet — hide the toolbar button entirely. Settings is the place
-    // to set it up, not a stray popover in the chat input.
-    _setButtonVisibility(false);
-    body.classList.add('hidden');
-    empty.classList.remove('hidden');
-    status.textContent = 'Not configured';
-    status.classList.add('gh-status-empty');
-    // Force the toggles off — can't use what isn't there.
-    _setReadEnabled(false);
-    _setWriteEnabled(false);
-  }
-  _syncPopoverFromState();
-}
-
-function _openSettingsToIntegrations() {
-  // The settings module exposes `open(tab)` on `window.settingsModule`.
-  // Fall back to a click on the existing settings entry if it isn't there.
-  try {
-    if (window.settingsModule && typeof window.settingsModule.open === 'function') {
-      window.settingsModule.open('integrations');
-      return;
-    }
-  } catch {}
-  const settingsBtn = document.getElementById('user-bar-settings');
-  if (settingsBtn) settingsBtn.click();
-}
-
-function _closePopover() {
-  const pop = $('gh-popover');
-  if (pop) pop.classList.add('hidden');
-}
-
-/** Position the popover relative to the toggle button. Since the popover is
- * `position: fixed` (to escape the chat-input stacking context), we have to
- * compute viewport coords manually each open. Sits 8px above the button,
- * left-aligned to its left edge, with a guard that slides it leftward if
- * the right edge would clip the viewport. */
-function _positionPopover() {
   const btn = $('gh-toggle-btn');
-  const pop = $('gh-popover');
-  if (!btn || !pop) return;
-  const r = btn.getBoundingClientRect();
-  // Reset any previous inline placement so we measure fresh dimensions.
-  pop.style.left = '0px';
-  pop.style.bottom = 'auto';
-  pop.style.top = '0px';
-  const pRect = pop.getBoundingClientRect();
-  const popW = pRect.width || 240;
-  const popH = pRect.height || 180;
-  let left = r.left;
-  // Slide left if we'd clip the right edge of the viewport.
-  if (left + popW > window.innerWidth - 8) {
-    left = Math.max(8, window.innerWidth - popW - 8);
-  }
-  pop.style.left = left + 'px';
-  pop.style.top = 'auto';
-  pop.style.bottom = (window.innerHeight - r.top + 8) + 'px';
+  if (btn) btn.style.display = visible ? '' : 'none';
 }
 
-async function _openPopover() {
-  const pop = $('gh-popover');
-  if (!pop) return;
-  pop.classList.remove('hidden');
-  _positionPopover();
-  // Always refresh on open — the user may have just configured GitHub in
-  // Settings and we want the new state to appear without a page reload.
-  _integration = await _fetchIntegration();
-  _renderPopover(_integration);
-  // Re-position in case rendering changed the popover's height (e.g. body
-  // shown vs empty state).
-  _positionPopover();
+async function _refresh() {
+  const info = await _fetchIntegration();
+  _configured = !!(info && info.configured);
+  _writeEnabled = !!(info && info.write_enabled);
+  _setButtonVisibility(_configured);
+  // If integration was deleted while toggle was on, force it off.
+  if (!_configured) _setEnabled(false);
+  // Re-mirror the write_enabled state into the hidden checkbox so chat.js
+  // picks it up on the next submit without waiting for a click.
+  _setEnabled($('gh-toggle')?.checked || false);
 }
 
-async function _wireUp() {
+function _wireUp() {
   const btn = $('gh-toggle-btn');
-  const pop = $('gh-popover');
-  if (!btn || !pop) return;  // markup not present (e.g. compare mode strips toolbar)
+  if (!btn) return;  // markup not present (e.g. compare mode strips toolbar)
 
-  // Restore previous session's toggle state from localStorage. Don't enable
-  // anything if no integration is configured — that's checked on popover
-  // open and would re-disable.
-  _setReadEnabled(_loadToggle(TOGGLE_KEY, false));
-  _setWriteEnabled(_loadToggle(WRITE_KEY, false));
-
-  // Initial fetch — drives the button's visibility. Configured = visible,
-  // not-configured = hidden until the user sets up a PAT in Settings.
-  // The settings card calls window.githubToggle.refresh() after save/delete
-  // so this also re-runs on those events without a page reload.
-  _integration = await _fetchIntegration();
-  _renderPopover(_integration);
+  // Restore previous session's toggle state.
+  _setEnabled(_loadToggle());
 
   btn.addEventListener('click', (e) => {
     e.stopPropagation();
-    if (pop.classList.contains('hidden')) _openPopover();
-    else _closePopover();
+    const chk = $('gh-toggle');
+    _setEnabled(!(chk && chk.checked));
   });
 
-  // Click outside → close.
-  document.addEventListener('click', (e) => {
-    if (pop.classList.contains('hidden')) return;
-    if (pop.contains(e.target) || btn.contains(e.target)) return;
-    _closePopover();
-  });
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && !pop.classList.contains('hidden')) _closePopover();
-  });
-
-  // Switches — write to hidden checkboxes + persist.
-  const enableSw = $('gh-popover-enable');
-  const writeSw = $('gh-popover-write');
-  if (enableSw) {
-    enableSw.addEventListener('change', () => {
-      _setReadEnabled(enableSw.checked);
-      // Turning off read also disables write (state-wise; the UI greys it).
-      if (!enableSw.checked) _setWriteEnabled(false);
-      _syncPopoverFromState();
-    });
-  }
-  if (writeSw) {
-    writeSw.addEventListener('change', () => {
-      _setWriteEnabled(writeSw.checked);
-      _syncPopoverFromState();
-    });
-  }
-
-  // Links into Settings.
-  const settingsLink = $('gh-popover-settings-link');
-  if (settingsLink) {
-    settingsLink.addEventListener('click', (e) => {
-      e.stopPropagation();
-      _closePopover();
-      _openSettingsToIntegrations();
-    });
-  }
-  const setupCta = $('gh-popover-setup-cta');
-  if (setupCta) {
-    setupCta.addEventListener('click', (e) => {
-      e.stopPropagation();
-      _closePopover();
-      _openSettingsToIntegrations();
-    });
-  }
+  // Initial fetch — drives button visibility + write_enabled state.
+  _refresh();
 }
 
 if (document.readyState === 'loading') {
@@ -243,11 +88,8 @@ if (document.readyState === 'loading') {
   _wireUp();
 }
 
-// Expose a tiny API so settings.js can poke us after a save / delete without
-// a page reload — e.g. "the user just removed their PAT, please rerender."
+// Settings page calls this after PAT save/delete or write_enabled toggle so
+// the chat-input button reflects the new state without a page reload.
 window.githubToggle = {
-  refresh: async () => {
-    _integration = await _fetchIntegration();
-    _renderPopover(_integration);
-  },
+  refresh: _refresh,
 };

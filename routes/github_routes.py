@@ -52,22 +52,31 @@ HOW THE WORK GETS DONE
 - Match the maintainer's idiom and roadmap. Skim their recent merged PRs and commit messages before drafting.
 - Lowest possible effort for the maintainer to merge: rebased on current upstream, minimal diff, clean commit history.
 
-HOW PRS READ
-- Lean bodies. Three to six short paragraphs is usually right. Long structured docs with H2 headers and bullet trees read as AI-generated.
-- No em-dashes. No "wart", "delve", "leverage", "robust", "seamless". No congratulatory openers ("Great question!").
-- No `**Problem:** / **Solution:** / **Impact:**` blocks unless the change genuinely needs them.
-- Direct about uncertainty and trade-offs. "Costs an extra subprocess on startup, ~200ms, felt worth it because X" beats hedged corporate-speak.
-
-PERMISSIONS
-- Don't push, comment, open PRs, or take any action visible to others without explicit confirmation from the user in this conversation.
-- For repos that aren't the user's, treat write actions as needing one-click approval per action — not just per session.
-
 ANTI-PATTERNS
 - Don't drop a fix without confirming the bug exists on current upstream.
 - Don't make the maintainer choose between approaches in a comment thread — ship cross-linked alternative PRs instead.
 - Don't include unrelated formatting changes in the diff.
 - Don't refer to maintainer code as a "wart" or "hack" even if it is. Stay neutral.
+
+# ───────────────────────────────────────────────────────────────────
+# FILL ME IN — the sections below ship blank on purpose.
+# Different models produce different AI-tells (em-dashes, "delve",
+# "robust", "leverage", certain rhythms). Your preferred PR voice
+# is yours. Tell the agent how you want to sound. Without these,
+# PRs will read as generic AI prose — technically correct, no soul.
+# ───────────────────────────────────────────────────────────────────
+
+YOUR PR-WRITING VOICE
+- (Fill in: how should the agent's PR bodies and comments sound? Formal or casual? Capital I in chat-style writing? Contractions? Short sentences or longer? Match the way YOU'D write the PR if you were typing it yourself.)
+
+ANTI-PATTERNS YOU'VE NOTICED
+- (Fill in: list phrases, structures, or tells from your current model that you don't want in your PR bodies. Example: "no em-dashes", "stop using 'wart'", "don't open with 'I hope this helps'". Different models have different tells — calibrate to whatever you're using.)
 """
+
+# Used by the settings card to detect "user hasn't filled in their style yet"
+# and show a soft banner nudging them to. Matches the section markers in
+# DEFAULT_BRIEFING; if the user removes the markers it stops nagging.
+_UNFILLED_MARKERS = ("(Fill in:",)
 
 
 # ── Pydantic request bodies ──
@@ -87,14 +96,25 @@ class UpdateFlagsRequest(BaseModel):
 
 # ── Helpers ──
 
+def _briefing_is_unfilled(text: str | None) -> bool:
+    """True if the briefing still contains the (Fill in: ...) prompts that
+    ship in the default. Used to nag the user in Settings until they
+    customize the style sections."""
+    if not text:
+        return True
+    return any(marker in text for marker in _UNFILLED_MARKERS)
+
+
 def _row_to_dict(row: GitHubIntegration) -> dict:
     """Public view of the integration row. NEVER includes the PAT."""
+    briefing = row.briefing or DEFAULT_BRIEFING
     return {
         "configured": True,
         "github_username": row.github_username,
         "enabled": bool(row.enabled),
         "write_enabled": bool(row.write_enabled),
-        "briefing": row.briefing or DEFAULT_BRIEFING,
+        "briefing": briefing,
+        "briefing_unfilled": _briefing_is_unfilled(briefing),
         "created_at": row.created_at.isoformat() if row.created_at else None,
         "updated_at": row.updated_at.isoformat() if row.updated_at else None,
     }
@@ -155,7 +175,11 @@ def setup_github_routes(mcp_manager=None):
         with SessionLocal() as db:
             row = db.query(GitHubIntegration).filter_by(owner=owner or "").first()
         if not row:
-            return {"configured": False, "briefing": DEFAULT_BRIEFING}
+            return {
+                "configured": False,
+                "briefing": DEFAULT_BRIEFING,
+                "briefing_unfilled": True,
+            }
         return _row_to_dict(row)
 
     @router.post("/integration")

@@ -219,7 +219,7 @@
       }, { once: true });
     })();
   </script>
-  <link rel="stylesheet" href="/static/style.css?v=338">
+  <link rel="stylesheet" href="/static/style.css?v=339">
   <link rel="modulepreload" href="/static/app.js">
   <link rel="modulepreload" href="/static/js/chat.js">
   <link rel="modulepreload" href="/static/js/ui.js">
@@ -1091,46 +1091,15 @@
               <polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>
             </svg>
           </button>
-          <!-- GitHub integration (wrapped so we can anchor the popover to it).
-               Hidden by default — githubToggle.js shows it after the initial
-               fetch confirms the user has a PAT configured. Avoids a flash
-               of the icon for users who haven't set up the integration. -->
-          <div class="gh-toggle-wrap" id="gh-toggle-wrap" style="position:relative;display:none;">
-            <button type="button" class="input-icon-btn" title="GitHub access" id="gh-toggle-btn" data-mode-tool="true">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/>
-              </svg>
-            </button>
-            <!-- Popover. Hidden by default; gh-toggle.js toggles .hidden on click. -->
-            <div class="gh-popover hidden" id="gh-popover" role="dialog" aria-label="GitHub integration controls">
-              <div class="gh-popover-header">
-                <span class="gh-popover-title">GitHub</span>
-                <span class="gh-popover-status" id="gh-popover-status">Not configured</span>
-              </div>
-              <div class="gh-popover-body" id="gh-popover-body">
-                <!-- Configured state: shows on/off + write toggle. Populated by gh-toggle.js. -->
-                <label class="gh-popover-row" id="gh-popover-row-enable">
-                  <span class="gh-popover-row-label">Enable for this chat</span>
-                  <input type="checkbox" class="gh-toggle-switch" id="gh-popover-enable">
-                </label>
-                <label class="gh-popover-row" id="gh-popover-row-write">
-                  <span class="gh-popover-row-label">
-                    Allow write actions
-                    <span class="gh-popover-row-hint">comments, open PRs, push</span>
-                  </span>
-                  <input type="checkbox" class="gh-toggle-switch" id="gh-popover-write">
-                </label>
-                <div class="gh-popover-footer">
-                  <button type="button" class="gh-popover-link" id="gh-popover-settings-link">Configure in Settings →</button>
-                </div>
-              </div>
-              <!-- Empty state: shown when no integration is set up. -->
-              <div class="gh-popover-empty hidden" id="gh-popover-empty">
-                <p class="gh-popover-empty-text">Add a GitHub Personal Access Token in Settings to enable PR-aware chats.</p>
-                <button type="button" class="gh-popover-cta" id="gh-popover-setup-cta">Set up GitHub</button>
-              </div>
-            </div>
-          </div>
+          <!-- GitHub integration toggle — same shape as web / bash: a single
+               icon button that flips a hidden checkbox. Hidden until the user
+               has saved a PAT in Settings -> Integrations; githubToggle.js
+               shows it after the initial /api/github/integration fetch. -->
+          <button type="button" class="input-icon-btn" title="GitHub access (PR-aware chat)" id="gh-toggle-btn" data-mode-tool="true" style="display:none;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/>
+            </svg>
+          </button>
           <!-- RAG toolbar indicator (hidden until active) -->
           <button type="button" class="input-icon-btn tool-indicator" title="RAG active — click to deactivate" id="rag-indicator-btn" style="display:none;">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -2227,16 +2196,31 @@
               </details>
             </div>
 
-            <!-- Write actions toggle lives in the chat-input popover, not
-                 here. It's a per-conversation decision (matches web / bash
-                 toggles) rather than a one-time grant. -->
-
+            <!-- Write actions grant. One-time decision: when ON, the agent
+                 can comment on PRs, open PRs, push to branches whenever the
+                 chat-input GitHub toggle is on. No per-action approval; you
+                 already signed up for it by enabling write. -->
+            <div class="gh-intg-section">
+              <label class="gh-intg-row">
+                <span>
+                  Allow write actions
+                  <span class="gh-intg-row-hint">comments, open PRs, push to branches</span>
+                </span>
+                <input type="checkbox" class="gh-toggle-switch" id="gh-intg-write">
+              </label>
+            </div>
 
             <!-- Briefing — the system-prompt addendum the agent gets when GitHub is on. -->
             <div class="gh-intg-section">
               <label class="gh-intg-label">Agent briefing</label>
               <div class="gh-intg-hint" style="margin-bottom:6px">
                 Appended to the agent's system prompt for any chat where you have the GitHub toggle on. Edit this to tighten the standards or change the tone — defaults ship with a sensible baseline.
+              </div>
+              <!-- Nudge: shown when DEFAULT_BRIEFING still has the (Fill in: ...)
+                   markers — i.e. the user hasn't customized the style sections.
+                   Hidden by settings.js once the markers are gone. -->
+              <div class="gh-intg-banner" id="gh-intg-briefing-nudge" style="display:none">
+                <strong>Your style sections are still blank.</strong> The agent will write generic AI prose unless you tell it how YOU want PRs to sound. Scroll to the bottom of the briefing and fill in <code>YOUR PR-WRITING VOICE</code> and <code>ANTI-PATTERNS YOU'VE NOTICED</code>.
               </div>
               <textarea id="gh-intg-briefing" rows="12" spellcheck="false"></textarea>
               <div class="gh-intg-briefing-actions">

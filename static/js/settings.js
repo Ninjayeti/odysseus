@@ -2150,6 +2150,7 @@ async function initGitHubIntegration() {
     });
     generateLink.href = `https://github.com/settings/tokens/new?${_params.toString()}`;
   }
+  const writeSw = el('gh-intg-write');
   const briefingTa = el('gh-intg-briefing');
   const briefingSave = el('gh-intg-briefing-save');
   const briefingReset = el('gh-intg-briefing-reset');
@@ -2175,14 +2176,22 @@ async function initGitHubIntegration() {
       patIn.placeholder = '••••••••  (replace to change)';
       patIn.value = '';
       disconnectSection.style.display = '';
+      writeSw.checked = !!info.write_enabled;
+      writeSw.disabled = false;
     } else {
       statusEl.textContent = 'Not connected';
       patIn.placeholder = 'ghp_...';
       disconnectSection.style.display = 'none';
+      writeSw.checked = false;
+      writeSw.disabled = true;
     }
     if (typeof info.briefing === 'string') {
       briefingTa.value = info.briefing;
     }
+    // Show/hide the "fill in your style" nudge based on the server's
+    // briefing_unfilled flag, which checks for the (Fill in: ...) markers.
+    const nudge = el('gh-intg-briefing-nudge');
+    if (nudge) nudge.style.display = info.briefing_unfilled ? '' : 'none';
   }
 
   async function _fetchState() {
@@ -2233,6 +2242,42 @@ async function initGitHubIntegration() {
     }
   });
 
+  writeSw.addEventListener('change', async (e) => {
+    const turningOn = writeSw.checked;
+    // First-time enable: hard WARNING confirm. After that, no prompt.
+    // Tracks a localStorage flag so users only see this once per browser;
+    // server-side is the source of truth for the actual flag value.
+    const _WARN_KEY = 'odysseus-gh-write-warn-acked';
+    if (turningOn && !localStorage.getItem(_WARN_KEY)) {
+      const msg =
+        'WARNING: enabling write actions lets the agent comment on PRs, ' +
+        'open PRs, and push to branches as you. These actions are public, ' +
+        'visible to maintainers, and hard to undo. The currently selected ' +
+        'model (and every model you switch to while this is on) will be ' +
+        'able to take these actions when you toggle GitHub on in the chat. ' +
+        '\n\nContinue?';
+      const ok = window.styledConfirm
+        ? await window.styledConfirm(msg, { confirmText: 'Enable write', danger: true })
+        : confirm(msg);
+      if (!ok) {
+        writeSw.checked = false;
+        return;
+      }
+      try { localStorage.setItem(_WARN_KEY, '1'); } catch {}
+    }
+    try {
+      await fetch('/api/github/integration/flags', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ write_enabled: writeSw.checked }),
+      });
+      // Tell the chat-input toggle so its internal write_enabled mirror
+      // updates without a page reload.
+      try { window.githubToggle && window.githubToggle.refresh && window.githubToggle.refresh(); } catch {}
+    } catch {}
+  });
+
   briefingSave.addEventListener('click', async () => {
     briefingSave.disabled = true;
     try {
@@ -2244,6 +2289,10 @@ async function initGitHubIntegration() {
       });
       if (!r.ok) { _flash(briefingMsg, 'Save failed', 'err'); return; }
       _flash(briefingMsg, 'Saved', 'ok');
+      // Re-fetch so the "fill in your style" nudge updates if the user
+      // just removed the (Fill in: ...) markers.
+      const fresh = await _fetchState();
+      if (fresh) _render(fresh);
     } catch (e) {
       _flash(briefingMsg, `Save failed: ${e.message || e}`, 'err');
     } finally {
