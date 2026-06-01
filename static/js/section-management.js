@@ -40,16 +40,24 @@ export function initSectionCollapse(Storage) {
         // Domino-out: play the fade/slide-down on .list-item children
         // BEFORE actually adding .collapsed (which hides them via
         // display:none). After the cascade finishes, lock in collapse.
-        // Force reflow so the keyframes restart.
-        // eslint-disable-next-line no-unused-expressions
-        section.offsetHeight;
-        section.classList.add('section-just-collapsing');
         const itemCount = Math.min(12, section.querySelectorAll('.list-item').length);
-        const total = itemCount * 25 + 230; // matches CSS keyframes + stagger
-        setTimeout(() => {
-          section.classList.remove('section-just-collapsing');
+        if (itemCount === 0) {
+          // No .list-item children means the section-domino-out CSS rule
+          // has nothing to target (e.g. #models-section uses .models-row).
+          // Skip the staged wait so the user doesn't see a dead pause
+          // before the section snaps shut.
           section.classList.add('collapsed');
-        }, total);
+        } else {
+          // Force reflow so the keyframes restart.
+          // eslint-disable-next-line no-unused-expressions
+          section.offsetHeight;
+          section.classList.add('section-just-collapsing');
+          const total = itemCount * 25 + 230; // matches CSS keyframes + stagger
+          setTimeout(() => {
+            section.classList.remove('section-just-collapsing');
+            section.classList.add('collapsed');
+          }, total);
+        }
       } else {
         // Expand path — already had this: remove .collapsed and replay
         // the inbound domino.
