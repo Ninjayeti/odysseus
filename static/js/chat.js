@@ -750,6 +750,17 @@ import createResearchSynapse from './researchSynapse.js';
       if (el('bash-toggle').checked) {
         fd.append('allow_bash', 'true');
       }
+      // GitHub: read tools gated on `gh-toggle`, write tools additionally
+      // gated on `gh-toggle-write`. When read is on, the user's saved
+      // briefing is appended to the system prompt server-side.
+      const ghChk = el('gh-toggle');
+      if (ghChk && ghChk.checked) {
+        fd.append('allow_github', 'true');
+        const ghWriteChk = el('gh-toggle-write');
+        if (ghWriteChk && ghWriteChk.checked) {
+          fd.append('allow_github_write', 'true');
+        }
+      }
       const ragChk = el('rag-toggle');
       if (ragChk && !ragChk.checked) {
         fd.append('use_rag', 'false');

@@ -219,7 +219,7 @@
       }, { once: true });
     })();
   </script>
-  <link rel="stylesheet" href="/static/style.css?v=333">
+  <link rel="stylesheet" href="/static/style.css?v=334">
   <link rel="modulepreload" href="/static/app.js">
   <link rel="modulepreload" href="/static/js/chat.js">
   <link rel="modulepreload" href="/static/js/ui.js">
@@ -1091,6 +1091,43 @@
               <polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>
             </svg>
           </button>
+          <!-- GitHub integration (wrapped so we can anchor the popover to it) -->
+          <div class="gh-toggle-wrap" id="gh-toggle-wrap" style="position:relative;display:inline-block;">
+            <button type="button" class="input-icon-btn" title="GitHub access" id="gh-toggle-btn" data-mode-tool="true">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/>
+              </svg>
+            </button>
+            <!-- Popover. Hidden by default; gh-toggle.js toggles .hidden on click. -->
+            <div class="gh-popover hidden" id="gh-popover" role="dialog" aria-label="GitHub integration controls">
+              <div class="gh-popover-header">
+                <span class="gh-popover-title">GitHub</span>
+                <span class="gh-popover-status" id="gh-popover-status">Not configured</span>
+              </div>
+              <div class="gh-popover-body" id="gh-popover-body">
+                <!-- Configured state: shows on/off + write toggle. Populated by gh-toggle.js. -->
+                <label class="gh-popover-row" id="gh-popover-row-enable">
+                  <span class="gh-popover-row-label">Enable for this chat</span>
+                  <input type="checkbox" class="gh-toggle-switch" id="gh-popover-enable">
+                </label>
+                <label class="gh-popover-row" id="gh-popover-row-write">
+                  <span class="gh-popover-row-label">
+                    Allow write actions
+                    <span class="gh-popover-row-hint">comments, open PRs, push</span>
+                  </span>
+                  <input type="checkbox" class="gh-toggle-switch" id="gh-popover-write">
+                </label>
+                <div class="gh-popover-footer">
+                  <button type="button" class="gh-popover-link" id="gh-popover-settings-link">Configure in Settings →</button>
+                </div>
+              </div>
+              <!-- Empty state: shown when no integration is set up. -->
+              <div class="gh-popover-empty hidden" id="gh-popover-empty">
+                <p class="gh-popover-empty-text">Add a GitHub Personal Access Token in Settings to enable PR-aware chats.</p>
+                <button type="button" class="gh-popover-cta" id="gh-popover-setup-cta">Set up GitHub</button>
+              </div>
+            </div>
+          </div>
           <!-- RAG toolbar indicator (hidden until active) -->
           <button type="button" class="input-icon-btn tool-indicator" title="RAG active — click to deactivate" id="rag-indicator-btn" style="display:none;">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -1139,6 +1176,11 @@
       <!-- Hidden checkboxes for state -->
       <input type="checkbox" id="web-toggle" style="display:none;">
       <input type="checkbox" id="bash-toggle" style="display:none;">
+      <!-- GitHub integration state. `gh-toggle` is the read-tools master
+           switch; `gh-toggle-write` additionally enables the write tools.
+           Both are mirrored by the popover switches in #gh-popover. -->
+      <input type="checkbox" id="gh-toggle" style="display:none;">
+      <input type="checkbox" id="gh-toggle-write" style="display:none;">
     </div>
     <form id="chat-form" autocomplete="off" action="javascript:void(0);" style="display:none;"></form>
 
@@ -2132,6 +2174,67 @@
               <button type="button" class="admin-btn-sm" id="unified-intg-add-btn">+ Add Integration</button>
             </div>
           </div>
+
+          <!-- GitHub integration: PAT + editable agent briefing.
+               State is driven by /api/github/integration. Wired by initGitHubIntegration() in settings.js. -->
+          <div class="admin-card" id="gh-intg-card" style="margin-top:12px;">
+            <h2>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.6">
+                <path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/>
+              </svg>
+              GitHub
+              <span id="gh-intg-status" style="font-size:11px;font-weight:400;opacity:0.55;margin-left:8px"></span>
+            </h2>
+            <div class="admin-toggle-sub" style="margin-bottom:10px">
+              Lets the agent read your PRs, search issues, and review diffs when you toggle the GitHub icon on in the chat input. Add a Personal Access Token to get started — repo scope for reads is enough; PRs + repo scopes if you also want write actions.
+            </div>
+
+            <!-- PAT input form (always shown; replaces existing PAT on save) -->
+            <div class="gh-intg-section">
+              <label class="gh-intg-label">Personal Access Token</label>
+              <div class="gh-intg-pat-row">
+                <input type="password" id="gh-intg-pat" placeholder="ghp_..." autocomplete="off">
+                <button type="button" class="admin-btn-sm" id="gh-intg-save">Save</button>
+              </div>
+              <div class="gh-intg-msg" id="gh-intg-pat-msg"></div>
+              <div class="gh-intg-hint">
+                Generate at <a href="https://github.com/settings/tokens?type=beta" target="_blank" rel="noopener">github.com/settings/tokens</a> — fine-grained tokens preferred. Repo permissions: Read for browsing PRs/issues; Read & Write if you also want the agent to comment / open PRs.
+              </div>
+            </div>
+
+            <!-- Write actions toggle. Only useful once a PAT is saved. -->
+            <div class="gh-intg-section">
+              <label class="gh-intg-row">
+                <span>
+                  Allow write actions
+                  <span class="gh-intg-row-hint">comments, open PRs, push — disabled by default</span>
+                </span>
+                <input type="checkbox" class="gh-toggle-switch" id="gh-intg-write">
+              </label>
+            </div>
+
+            <!-- Briefing — the system-prompt addendum the agent gets when GitHub is on. -->
+            <div class="gh-intg-section">
+              <label class="gh-intg-label">Agent briefing</label>
+              <div class="gh-intg-hint" style="margin-bottom:6px">
+                Appended to the agent's system prompt for any chat where you have the GitHub toggle on. Edit this to tighten the standards or change the tone — defaults ship with a sensible baseline.
+              </div>
+              <textarea id="gh-intg-briefing" rows="12" spellcheck="false"></textarea>
+              <div class="gh-intg-briefing-actions">
+                <button type="button" class="admin-btn-sm" id="gh-intg-briefing-save">Save briefing</button>
+                <button type="button" class="admin-btn-sm" id="gh-intg-briefing-reset">Reset to default</button>
+                <span class="gh-intg-msg" id="gh-intg-briefing-msg"></span>
+              </div>
+            </div>
+
+            <!-- Disconnect — wipes the PAT, briefing stays for next time. -->
+            <div class="gh-intg-section" id="gh-intg-disconnect-section" style="display:none">
+              <button type="button" class="admin-btn-sm" id="gh-intg-disconnect" style="color:var(--red,#ff4d4f);border-color:var(--red,#ff4d4f);">
+                Disconnect GitHub
+              </button>
+              <span class="gh-intg-hint" style="margin-left:8px">Removes the PAT. Briefing is preserved.</span>
+            </div>
+          </div>
         </div>
 
         <!-- ═══ TOOLS TAB ═══ -->
@@ -2280,6 +2383,7 @@
 <script type="module" src="/static/js/assistant.js"></script>
 <script type="module" src="/static/app.js"></script>  <!-- app.js must be LAST -->
 <script type="module" src="/static/js/terminal.js"></script>
+<script type="module" src="/static/js/githubToggle.js"></script>
 <script type="module" src="/static/js/init.js"></script>
 <script nonce="{{CSP_NONCE}}">if('serviceWorker' in navigator){navigator.serviceWorker.register('/static/sw.js').catch(()=>{});}</script>
 </body>

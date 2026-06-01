@@ -2116,6 +2116,177 @@ function initAll() {
   initEmailAccountsSettings();
   initReminderSettings();
   initUnifiedIntegrations();
+  initGitHubIntegration();
+}
+
+
+// ── GitHub integration settings card ──
+// Wires the #gh-intg-card markup (in index.html, Integrations tab) to the
+// /api/github/integration endpoints. Handles four user actions: save PAT,
+// edit briefing, toggle write permission, disconnect. Each save updates
+// the card's status line and (where relevant) calls back into the chat-
+// input toggle so its popover stays in sync without a page reload.
+let _ghInitDone = false;
+async function initGitHubIntegration() {
+  if (_ghInitDone) return;
+  const card = el('gh-intg-card');
+  if (!card) return;
+  _ghInitDone = true;
+
+  const patIn = el('gh-intg-pat');
+  const patBtn = el('gh-intg-save');
+  const patMsg = el('gh-intg-pat-msg');
+  const writeSw = el('gh-intg-write');
+  const briefingTa = el('gh-intg-briefing');
+  const briefingSave = el('gh-intg-briefing-save');
+  const briefingReset = el('gh-intg-briefing-reset');
+  const briefingMsg = el('gh-intg-briefing-msg');
+  const disconnectSection = el('gh-intg-disconnect-section');
+  const disconnectBtn = el('gh-intg-disconnect');
+  const statusEl = el('gh-intg-status');
+
+  let _defaultBriefing = '';  // captured from a fresh-state GET; used by "Reset to default"
+
+  function _flash(msgEl, text, kind) {
+    if (!msgEl) return;
+    msgEl.textContent = text;
+    msgEl.classList.remove('ok', 'err');
+    if (kind) msgEl.classList.add(kind);
+    if (kind === 'ok') setTimeout(() => { msgEl.textContent = ''; msgEl.classList.remove('ok'); }, 2200);
+  }
+
+  function _render(info) {
+    if (!info) return;
+    if (info.configured) {
+      statusEl.textContent = `Connected as @${info.github_username || '?'}`;
+      patIn.placeholder = '••••••••  (replace to change)';
+      patIn.value = '';
+      disconnectSection.style.display = '';
+      writeSw.checked = !!info.write_enabled;
+      writeSw.disabled = false;
+    } else {
+      statusEl.textContent = 'Not connected';
+      patIn.placeholder = 'ghp_...';
+      disconnectSection.style.display = 'none';
+      writeSw.checked = false;
+      writeSw.disabled = true;
+    }
+    if (typeof info.briefing === 'string') {
+      briefingTa.value = info.briefing;
+    }
+  }
+
+  async function _fetchState() {
+    try {
+      const r = await fetch('/api/github/integration', { credentials: 'same-origin' });
+      if (!r.ok) return null;
+      const data = await r.json();
+      // Stash the default briefing the first time we see the not-configured
+      // state, so "Reset to default" can restore it without an extra request.
+      if (!_defaultBriefing && data && data.briefing) _defaultBriefing = data.briefing;
+      return data;
+    } catch { return null; }
+  }
+
+  async function _refresh() {
+    const info = await _fetchState();
+    _render(info);
+    // Tell the chat-input toggle to re-read its state from the server too.
+    try { if (window.githubToggle && window.githubToggle.refresh) window.githubToggle.refresh(); } catch {}
+  }
+
+  // ── Action handlers ──
+
+  patBtn.addEventListener('click', async () => {
+    const pat = (patIn.value || '').trim();
+    if (!pat) { _flash(patMsg, 'Paste a PAT first.', 'err'); return; }
+    patBtn.disabled = true;
+    _flash(patMsg, 'Validating with GitHub…', null);
+    try {
+      const r = await fetch('/api/github/integration', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pat }),
+      });
+      const data = await r.json();
+      if (!r.ok) {
+        _flash(patMsg, data.detail || 'Save failed', 'err');
+        return;
+      }
+      _flash(patMsg, `Connected as @${data.github_username}`, 'ok');
+      _render(data);
+      try { if (window.githubToggle && window.githubToggle.refresh) window.githubToggle.refresh(); } catch {}
+    } catch (e) {
+      _flash(patMsg, `Save failed: ${e.message || e}`, 'err');
+    } finally {
+      patBtn.disabled = false;
+    }
+  });
+
+  writeSw.addEventListener('change', async () => {
+    try {
+      await fetch('/api/github/integration/flags', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ write_enabled: writeSw.checked }),
+      });
+    } catch {}
+  });
+
+  briefingSave.addEventListener('click', async () => {
+    briefingSave.disabled = true;
+    try {
+      const r = await fetch('/api/github/integration/briefing', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ briefing: briefingTa.value }),
+      });
+      if (!r.ok) { _flash(briefingMsg, 'Save failed', 'err'); return; }
+      _flash(briefingMsg, 'Saved', 'ok');
+    } catch (e) {
+      _flash(briefingMsg, `Save failed: ${e.message || e}`, 'err');
+    } finally {
+      briefingSave.disabled = false;
+    }
+  });
+
+  briefingReset.addEventListener('click', async () => {
+    // Posting an empty string resets to default server-side; we also reflect
+    // it locally without waiting for the round-trip.
+    try {
+      const r = await fetch('/api/github/integration/briefing', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ briefing: '' }),
+      });
+      if (!r.ok) { _flash(briefingMsg, 'Reset failed', 'err'); return; }
+      const data = await r.json();
+      briefingTa.value = data.briefing || _defaultBriefing || '';
+      _flash(briefingMsg, 'Reset to default', 'ok');
+    } catch (e) {
+      _flash(briefingMsg, `Reset failed: ${e.message || e}`, 'err');
+    }
+  });
+
+  disconnectBtn.addEventListener('click', async () => {
+    if (!confirm('Disconnect GitHub? Your briefing is preserved; only the PAT is removed.')) return;
+    try {
+      await fetch('/api/github/integration', { method: 'DELETE', credentials: 'same-origin' });
+      _flash(patMsg, 'Disconnected', 'ok');
+      await _refresh();
+    } catch (e) {
+      _flash(patMsg, `Disconnect failed: ${e.message || e}`, 'err');
+    }
+  });
+
+  // Refresh on first show + every time the integrations tab is opened.
+  // The settings modal already wires tab-shown events; here we just hook
+  // a one-shot initial load.
+  await _refresh();
 }
 
 function notifyIntegrationsChanged() {
