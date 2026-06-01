@@ -179,17 +179,7 @@ export async function refreshModels(force = false) {
       const res = await fetch(`${API_BASE}/api/models`);
       const data = await res.json();
       _lastFetchTime = Date.now();
-      const hadNone = _cachedItems.length === 0;
       _cachedItems = data.items || [];
-      // When the endpoint count crosses 0 → N (first endpoint just added,
-      // or models loaded for the first time), re-apply UI visibility so
-      // `models-section` auto-reveals. Without this, the user has to
-      // reload the page to see the section appear.
-      if (hadNone && _cachedItems.length > 0) {
-        try {
-          if (window.applyUIVis && window.loadUIVis) window.applyUIVis(window.loadUIVis());
-        } catch (_) {}
-      }
     } catch (e) {
       console.error(e);
       box.textContent = '(scan failed)';
