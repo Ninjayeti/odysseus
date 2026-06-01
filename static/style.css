@@ -2708,15 +2708,66 @@ body.bg-pattern-sparkles {
     .model-picker-list .model-switch-item {
       display: flex;
       align-items: center;
-      padding: 5px 8px;
+      padding: 6px 10px;
       border-radius: 4px;
       cursor: pointer;
       font-size: 0.82em;
       color: var(--fg);
-      gap: 6px;
+      gap: 8px;
     }
     .model-picker-list .model-switch-item:hover {
       background: color-mix(in srgb, var(--red) 8%, transparent);
+    }
+    /* Model name eats the free space so the endpoint label gets pushed to
+       the far right of the row instead of sitting next to the name. */
+    .model-picker-list .model-switch-name {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    /* Endpoint label — visually subordinate. Smaller + dimmer + capped so it
+       doesn't push the model name off-screen when an endpoint name is long. */
+    .model-picker-list .model-switch-ep {
+      font-size: 0.78em;
+      opacity: 0.45;
+      flex-shrink: 0;
+      max-width: 45%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .model-picker-list .model-switch-ep:empty {
+      display: none;
+    }
+    /* Inline favorite star — sits flush right of the row. Click to toggle
+       favorite without picking the model. Filled (★) when favorited,
+       outline (☆) when not. Dim by default so it doesn't compete with
+       the model name visually. */
+    .model-picker-list .model-switch-fav {
+      all: unset;
+      flex-shrink: 0;
+      width: 22px;
+      height: 22px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      border-radius: 3px;
+      font-size: 14px;
+      line-height: 1;
+      opacity: 0.35;
+      color: var(--fg);
+      transition: opacity 0.12s, color 0.12s, background 0.12s;
+    }
+    .model-picker-list .model-switch-fav:hover {
+      opacity: 1;
+      background: color-mix(in srgb, var(--accent, var(--red)) 14%, transparent);
+    }
+    .model-picker-list .model-switch-fav.active {
+      opacity: 0.95;
+      color: var(--accent, var(--red));
     }
     .model-picker-list .model-switch-empty {
       display: flex;

@@ -2358,8 +2358,24 @@ function initializeEventListeners() {
     'rail-new-chat':       '#rail-new-session',
   };
 
-  // Keys hidden by default on first run (no localStorage yet)
+  // Keys hidden by default on first run (no localStorage yet).
+  // `models-section` is special-cased below: it's hidden until the user has
+  // any endpoint configured, then auto-revealed. Listed here so admin/reset
+  // paths still treat it as a non-default-on key for UX consistency.
   const UI_VIS_DEFAULT_OFF = new Set(['models-section', 'rag-toggle-btn']);
+
+  // Auto-reveal trigger for `models-section`: any endpoint configured means
+  // there are models worth favoriting / reordering, so the section becomes
+  // useful. Without this, the only place to favorite a model (the star
+  // button in the sidebar Models row) is invisible until the user finds
+  // it in Settings, which is bad onboarding.
+  function _hasAnyEndpoint() {
+    try {
+      return !!(window.modelsModule
+        && window.modelsModule.getCachedItems
+        && window.modelsModule.getCachedItems().length > 0);
+    } catch (_) { return false; }
+  }
 
   // Keys that need admin to toggle off (reserved for future use)
   const UI_VIS_ADMIN_ONLY = new Set([]);
@@ -2376,7 +2392,11 @@ function initializeEventListeners() {
     Object.entries(UI_VIS_MAP).forEach(([key, selector]) => {
       // section-drag-reorder uses a body class instead of inline styles
       if (key === 'section-drag-reorder') return;
-      const visible = key in state ? state[key] !== false : !UI_VIS_DEFAULT_OFF.has(key);
+      const visible = key in state
+        ? state[key] !== false
+        : (key === 'models-section'
+            ? _hasAnyEndpoint()
+            : !UI_VIS_DEFAULT_OFF.has(key));
       document.querySelectorAll(selector).forEach(el => {
         el.style.display = visible ? '' : 'none';
       });

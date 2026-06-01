@@ -210,6 +210,7 @@ function _initModelPickerDropdown() {
         row.appendChild(logoSpan);
       }
       const nameSpan = document.createElement('span');
+      nameSpan.className = 'model-switch-name';
       nameSpan.textContent = m.display;
       row.appendChild(nameSpan);
       if (m.stale) {
@@ -225,6 +226,30 @@ function _initModelPickerDropdown() {
       const _epDisplay = m.epName && !m.display.toLowerCase().includes(m.epName.toLowerCase().split('/').pop()) ? m.epName : '';
       epSpan.textContent = _epDisplay;
       row.appendChild(epSpan);
+
+      // Star toggle — inline favoriting without leaving the picker. Filled
+      // when this model is in the favorites list, outline otherwise. The
+      // sidebar Models section also writes to FAV_KEY, so they stay in
+      // sync via the shared localStorage key.
+      const favBtn = document.createElement('button');
+      favBtn.type = 'button';
+      const isFav = favs.includes(m.mid);
+      favBtn.className = 'model-switch-fav' + (isFav ? ' active' : '');
+      favBtn.textContent = isFav ? '★' : '☆';
+      favBtn.title = isFav ? 'Unfavorite' : 'Favorite';
+      favBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        try {
+          const cur = JSON.parse(localStorage.getItem(FAV_KEY) || '[]');
+          const idx = cur.indexOf(m.mid);
+          if (idx >= 0) cur.splice(idx, 1);
+          else cur.push(m.mid);
+          localStorage.setItem(FAV_KEY, JSON.stringify(cur));
+        } catch {}
+        _populate(search.value || '');
+      });
+      row.appendChild(favBtn);
+
       row.addEventListener('click', () => _pick(m));
       (container || listEl).appendChild(row);
     }
