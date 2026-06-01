@@ -8,6 +8,15 @@ import { sortModelObjects } from './modelSort.js';
 
 const API_BASE = window.location.origin;
 
+// localStorage keys for the picker's two persisted lists.
+//   FAV_KEY    — manual favorites, toggled by the user.
+//   RECENT_KEY — auto, most-recent-first list of the last MAX_RECENT picks.
+// Recent + Favorites are the only sections the picker ever shows when not
+// searching; everything else lives behind the search bar.
+const FAV_KEY = 'odysseus-model-favorites';
+const RECENT_KEY = 'odysseus-model-recent';
+const MAX_RECENT = 5;
+
 // ── Shared keyboard nav for model pickers ──
 function _handlePickerKeydown(e, listEl, itemSelector, closeFn) {
   if (e.key === 'Escape') { closeFn(); return; }
@@ -174,19 +183,9 @@ function _initModelPickerDropdown() {
       searchRow.classList.toggle('searching', !!filter);
     }
 
-    // Load favorites
-    const favs = (function() { try { return JSON.parse(localStorage.getItem('odysseus-model-favorites') || '[]'); } catch { return []; } })();
-
-    // Partition: favorites first, then rest
-    const favModels = [];
-    const restModels = [];
-    all.forEach(m => {
-      if (q && !m.mid.toLowerCase().includes(q) && !m.display.toLowerCase().includes(q)) return;
-      if (favs.includes(m.mid)) favModels.push(m);
-      else restModels.push(m);
-    });
-    sortModelObjects(favModels).forEach(function(m, i) { favModels[i] = m; });
-    sortModelObjects(restModels).forEach(function(m, i) { restModels[i] = m; });
+    // Load favorites (manual) + recents (auto, last 5 picks).
+    const favs = (function() { try { return JSON.parse(localStorage.getItem(FAV_KEY) || '[]'); } catch { return []; } })();
+    const recents = (function() { try { return JSON.parse(localStorage.getItem(RECENT_KEY) || '[]'); } catch { return []; } })();
 
     function _addSection(label) {
       const el = document.createElement('div');
@@ -230,68 +229,50 @@ function _initModelPickerDropdown() {
       (container || listEl).appendChild(row);
     }
 
-    // Render favorites flat at the top (the "common case" path — one click).
-    if (favModels.length > 0) {
-      _addSection('Favorites');
-      favModels.forEach(m => _addRow(m, listEl));
+    // Two render modes:
+    //   - Searching (q non-empty): one flat sorted result list, no sections.
+    //   - Browsing (q empty): Recent (top) + Favorites (below). Nothing else.
+    // We deliberately don't render an "All models" or per-provider section in
+    // the picker — the catalog can be hundreds of models long (OpenRouter
+    // returns 350+) and dumping them here makes the picker a wall. Discovery
+    // is the search bar's job; the picker is the quick-switch.
+    if (q) {
+      const matches = all.filter(m =>
+        m.mid.toLowerCase().includes(q) || m.display.toLowerCase().includes(q)
+      );
+      sortModelObjects(matches).forEach(m => _addRow(m, listEl));
+    } else {
+      // Recent: most-recent-first, capped at MAX_RECENT, only models still in
+      // the catalog (so stale IDs don't render as dead rows).
+      const byId = new Map(all.map(m => [m.mid, m]));
+      const recentModels = recents
+        .map(id => byId.get(id))
+        .filter(Boolean)
+        .slice(0, MAX_RECENT);
+      const recentSet = new Set(recentModels.map(m => m.mid));
+      const favModels = favs
+        .map(id => byId.get(id))
+        .filter(m => m && !recentSet.has(m.mid));  // Don't double-list a model that's in both
+
+      if (recentModels.length > 0) {
+        _addSection('Recent');
+        recentModels.forEach(m => _addRow(m, listEl));
+      }
+      if (favModels.length > 0) {
+        _addSection('Favorites');
+        sortModelObjects(favModels).forEach(m => _addRow(m, listEl));
+      }
     }
-
-    // Group the rest by provider. For slash-prefixed IDs (OpenRouter style:
-    // `anthropic/claude-...`, `openai/gpt-...`) the prefix is the provider;
-    // for everything else fall back to the endpoint name. This avoids any
-    // hand-curated provider list — the grouping is purely derived from data
-    // the endpoint already returns.
-    const groups = new Map();
-    restModels.forEach(m => {
-      // Strip leading non-alphanumeric chars — OpenRouter uses `~anthropic/...`
-      // for aliased/auto-routed models; we want those to bucket under
-      // 'anthropic', not 'Other'.
-      const provider = m.mid.includes('/')
-        ? m.mid.split('/')[0].replace(/^[^a-z0-9]+/i, '')
-        : (m.epName || 'Other').split('/').pop();
-      if (!groups.has(provider)) groups.set(provider, []);
-      groups.get(provider).push(m);
-    });
-
-    // Each provider becomes a collapsible section. Default-collapsed when
-    // there's no search query (browse-by-brand discovery), auto-expanded
-    // when filtering so matching results are always visible. Sort
-    // alphabetically — the upstream catalog order is arbitrary and counts-
-    // based sort just rewards bulk-publishers like Qwen over recognizable
-    // brands like Anthropic, hurting findability.
-    const sorted = [...groups.entries()].sort((a, b) =>
-      a[0].localeCompare(b[0], undefined, { sensitivity: 'base' })
-    );
-    sorted.forEach(([provider, models]) => {
-      const header = document.createElement('div');
-      header.className = 'mp-provider-header';
-      // Title-case bare lowercase IDs like 'anthropic' → 'Anthropic'; leave
-      // mixed-case ones like 'xAI Grok' alone.
-      const label = /^[a-z]+$/.test(provider)
-        ? provider[0].toUpperCase() + provider.slice(1)
-        : provider;
-      header.innerHTML = `<span class="mp-provider-name">${label}</span><span class="mp-provider-count">${models.length}</span><span class="mp-provider-chev">▸</span>`;
-      const group = document.createElement('div');
-      group.className = 'mp-provider-group';
-      if (!q) group.classList.add('hidden');
-      else header.classList.add('open');
-      models.forEach(m => _addRow(m, group));
-      header.addEventListener('click', () => {
-        group.classList.toggle('hidden');
-        header.classList.toggle('open');
-      });
-      listEl.appendChild(header);
-      listEl.appendChild(group);
-    });
 
     if (listEl.children.length === 0) {
       const empty = document.createElement('div');
       empty.className = 'model-switch-empty';
-      if (hasAnyModel) {
-        empty.textContent = 'No matching models';
-      } else {
-        return;
+      if (!hasAnyModel) {
+        return;  // The .no-models class on `menu` handles this state's copy.
       }
+      empty.textContent = q
+        ? 'No matching models'
+        : `Search ${all.length} model${all.length === 1 ? '' : 's'} above`;
       listEl.appendChild(empty);
     }
   }
@@ -299,6 +280,15 @@ function _initModelPickerDropdown() {
   async function _pick(m) {
     const currentSessionId = _deps.getCurrentSessionId();
     const _pendingChat = _deps.getPendingChat();
+
+    // Update Recent: push to front, dedupe, cap. This is what makes the
+    // picker "self-teach" — pick a model once and it shows up in the Recent
+    // section next open, so the user never has to find it via search again.
+    try {
+      const prior = JSON.parse(localStorage.getItem(RECENT_KEY) || '[]');
+      const next = [m.mid, ...prior.filter(id => id !== m.mid)].slice(0, MAX_RECENT);
+      localStorage.setItem(RECENT_KEY, JSON.stringify(next));
+    } catch {}
 
     // Broadcast immediately so listeners (e.g. the tour) can advance without
     // waiting for the async session-create/PATCH that follows.
