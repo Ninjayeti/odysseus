@@ -2171,19 +2171,28 @@ async function initGitHubIntegration() {
 
   function _render(info) {
     if (!info) return;
+    const tabBtn = el('gh-settings-tab-btn');
+    const tabStatus = el('gh-tab-status');
+    const connectedPtr = el('gh-intg-connected-pointer');
     if (info.configured) {
       statusEl.textContent = `Connected as ${info.github_username || '?'}`;
+      if (tabStatus) tabStatus.textContent = `Connected as ${info.github_username || '?'}`;
       patIn.placeholder = '••••••••  (replace to change)';
       patIn.value = '';
       disconnectSection.style.display = '';
       writeSw.checked = !!info.write_enabled;
       writeSw.disabled = false;
+      if (tabBtn) tabBtn.style.display = '';
+      if (connectedPtr) connectedPtr.style.display = '';
     } else {
       statusEl.textContent = 'Not connected';
+      if (tabStatus) tabStatus.textContent = '';
       patIn.placeholder = 'ghp_...';
       disconnectSection.style.display = 'none';
       writeSw.checked = false;
       writeSw.disabled = true;
+      if (tabBtn) tabBtn.style.display = 'none';
+      if (connectedPtr) connectedPtr.style.display = 'none';
     }
     if (typeof info.briefing === 'string') {
       briefingTa.value = info.briefing;
@@ -2192,6 +2201,18 @@ async function initGitHubIntegration() {
     // briefing_unfilled flag, which checks for the (Fill in: ...) markers.
     const nudge = el('gh-intg-briefing-nudge');
     if (nudge) nudge.style.display = info.briefing_unfilled ? '' : 'none';
+  }
+
+  // Cross-links between the Integrations connection card and the dedicated
+  // GitHub tab. We're already inside settings.js, so just call the local
+  // `open(tab)` directly — no need to round-trip through window.
+  const goToTab = el('gh-intg-go-to-tab');
+  if (goToTab) {
+    goToTab.addEventListener('click', (e) => { e.preventDefault(); open('github'); });
+  }
+  const goToIntg = el('gh-tab-back-to-intg');
+  if (goToIntg) {
+    goToIntg.addEventListener('click', (e) => { e.preventDefault(); open('integrations'); });
   }
 
   async function _fetchState() {
@@ -4522,6 +4543,10 @@ export function close() {
 }
 
 const settingsModule = { open, close, initIntegrations, initUnifiedIntegrations, syncAdminVisibility, refreshAiModelEndpoints };
+// Expose on window so non-module scripts (e.g. github-toggle popover links)
+// can programmatically navigate to a tab. ES-module consumers should keep
+// importing the default export.
+try { window.settingsModule = settingsModule; } catch (_) {}
 
 
 export default settingsModule;
