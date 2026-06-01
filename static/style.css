@@ -2292,9 +2292,10 @@ body.bg-pattern-sparkles {
       background: color-mix(in srgb, var(--accent, var(--red)) 14%, transparent);
     }
     .gh-popover {
-      position: absolute;
-      bottom: calc(100% + 8px);
-      left: 0;
+      /* Fixed (not absolute) so it escapes the chat-input-area stacking
+         context, which otherwise traps it below the chat history regardless
+         of z-index. JS positions it relative to the toggle button on open. */
+      position: fixed;
       min-width: 240px;
       max-width: 280px;
       padding: 10px 12px;
@@ -2303,7 +2304,7 @@ body.bg-pattern-sparkles {
       border: 1px solid var(--border);
       border-radius: 8px;
       box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
-      z-index: 50;
+      z-index: 9999;
       font-size: 12px;
     }
     .gh-popover.hidden { display: none; }

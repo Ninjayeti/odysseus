@@ -123,14 +123,45 @@ function _closePopover() {
   if (pop) pop.classList.add('hidden');
 }
 
+/** Position the popover relative to the toggle button. Since the popover is
+ * `position: fixed` (to escape the chat-input stacking context), we have to
+ * compute viewport coords manually each open. Sits 8px above the button,
+ * left-aligned to its left edge, with a guard that slides it leftward if
+ * the right edge would clip the viewport. */
+function _positionPopover() {
+  const btn = $('gh-toggle-btn');
+  const pop = $('gh-popover');
+  if (!btn || !pop) return;
+  const r = btn.getBoundingClientRect();
+  // Reset any previous inline placement so we measure fresh dimensions.
+  pop.style.left = '0px';
+  pop.style.bottom = 'auto';
+  pop.style.top = '0px';
+  const pRect = pop.getBoundingClientRect();
+  const popW = pRect.width || 240;
+  const popH = pRect.height || 180;
+  let left = r.left;
+  // Slide left if we'd clip the right edge of the viewport.
+  if (left + popW > window.innerWidth - 8) {
+    left = Math.max(8, window.innerWidth - popW - 8);
+  }
+  pop.style.left = left + 'px';
+  pop.style.top = 'auto';
+  pop.style.bottom = (window.innerHeight - r.top + 8) + 'px';
+}
+
 async function _openPopover() {
   const pop = $('gh-popover');
   if (!pop) return;
   pop.classList.remove('hidden');
+  _positionPopover();
   // Always refresh on open — the user may have just configured GitHub in
   // Settings and we want the new state to appear without a page reload.
   _integration = await _fetchIntegration();
   _renderPopover(_integration);
+  // Re-position in case rendering changed the popover's height (e.g. body
+  // shown vs empty state).
+  _positionPopover();
 }
 
 async function _wireUp() {
