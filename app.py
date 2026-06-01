@@ -77,9 +77,17 @@ app.add_middleware(SecurityHeadersMiddleware)
 # (streaming, long-running shell exec, research) are exempt because they
 # legitimately stay open. Without this, a single hung subprocess.run or
 # missing-timeout httpx call locks up the entire server for everyone.
+#
+# Implemented as a pure ASGI middleware (NOT BaseHTTPMiddleware). Wrapping
+# asyncio.wait_for() around BaseHTTPMiddleware.call_next() is a well-known
+# cursed pattern: when the timeout fires, the cancellation crosses
+# BaseHTTPMiddleware's internal anyio task group in a way anyio cannot
+# safely unwind, and anyio's _deliver_cancellation busy-loops trying to
+# cancel forever — pegging a CPU at ~100% for the life of the process.
+# Refs:
+#   - https://github.com/encode/starlette/issues/1438
+#   - https://github.com/Kludex/starlette/discussions/2160
 import asyncio as _asyncio
-from starlette.middleware.base import BaseHTTPMiddleware as _BaseHTTPMiddleware
-from starlette.responses import JSONResponse as _JSONResponse
 
 REQUEST_HARD_TIMEOUT = float(os.getenv("REQUEST_HARD_TIMEOUT", "45"))
 _TIMEOUT_EXEMPT_PREFIXES = (
@@ -95,18 +103,57 @@ _TIMEOUT_EXEMPT_PREFIXES = (
 )
 
 
-class _RequestTimeoutMiddleware(_BaseHTTPMiddleware):
-    async def dispatch(self, request, call_next):
-        path = request.url.path or ""
-        if any(path.startswith(p) for p in _TIMEOUT_EXEMPT_PREFIXES):
-            return await call_next(request)
+class _RequestTimeoutMiddleware:
+    """Pure ASGI middleware enforcing a per-request hard timeout.
+
+    Wraps the downstream ASGI app coroutine in asyncio.wait_for(). On
+    timeout, sends a 504 JSON response — but only if the wrapped app has
+    not already started sending headers (otherwise the response is just
+    truncated, which is the best ASGI can do mid-stream).
+    """
+
+    def __init__(self, app, timeout: float = REQUEST_HARD_TIMEOUT,
+                 exempt_prefixes=_TIMEOUT_EXEMPT_PREFIXES):
+        self.app = app
+        self.timeout = timeout
+        self.exempt_prefixes = tuple(exempt_prefixes)
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        path = scope.get("path", "") or ""
+        if any(path.startswith(p) for p in self.exempt_prefixes):
+            await self.app(scope, receive, send)
+            return
+
+        response_started = False
+
+        async def send_wrapper(message):
+            nonlocal response_started
+            if message["type"] == "http.response.start":
+                response_started = True
+            await send(message)
+
         try:
-            return await _asyncio.wait_for(call_next(request), timeout=REQUEST_HARD_TIMEOUT)
-        except _asyncio.TimeoutError:
-            return _JSONResponse(
-                {"detail": f"Request exceeded {REQUEST_HARD_TIMEOUT:.0f}s timeout"},
-                status_code=504,
+            await _asyncio.wait_for(
+                self.app(scope, receive, send_wrapper),
+                timeout=self.timeout,
             )
+        except _asyncio.TimeoutError:
+            if response_started:
+                # Headers already went out — can't change status code.
+                # Client sees a truncated response; that's the best we can do.
+                return
+            await send({
+                "type": "http.response.start",
+                "status": 504,
+                "headers": [(b"content-type", b"application/json")],
+            })
+            await send({
+                "type": "http.response.body",
+                "body": f'{{"detail":"Request exceeded {self.timeout:.0f}s timeout"}}'.encode(),
+            })
 
 
 app.add_middleware(_RequestTimeoutMiddleware)
