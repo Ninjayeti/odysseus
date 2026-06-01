@@ -243,8 +243,11 @@ function _initModelPickerDropdown() {
     // the endpoint already returns.
     const groups = new Map();
     restModels.forEach(m => {
+      // Strip leading non-alphanumeric chars — OpenRouter uses `~anthropic/...`
+      // for aliased/auto-routed models; we want those to bucket under
+      // 'anthropic', not 'Other'.
       const provider = m.mid.includes('/')
-        ? m.mid.split('/')[0]
+        ? m.mid.split('/')[0].replace(/^[^a-z0-9]+/i, '')
         : (m.epName || 'Other').split('/').pop();
       if (!groups.has(provider)) groups.set(provider, []);
       groups.get(provider).push(m);
