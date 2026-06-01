@@ -219,7 +219,7 @@
       }, { once: true });
     })();
   </script>
-  <link rel="stylesheet" href="/static/style.css?v=337">
+  <link rel="stylesheet" href="/static/style.css?v=338">
   <link rel="modulepreload" href="/static/app.js">
   <link rel="modulepreload" href="/static/js/chat.js">
   <link rel="modulepreload" href="/static/js/ui.js">
@@ -2227,16 +2227,10 @@
               </details>
             </div>
 
-            <!-- Write actions toggle. Only useful once a PAT is saved. -->
-            <div class="gh-intg-section">
-              <label class="gh-intg-row">
-                <span>
-                  Allow write actions
-                  <span class="gh-intg-row-hint">comments, open PRs, push — disabled by default</span>
-                </span>
-                <input type="checkbox" class="gh-toggle-switch" id="gh-intg-write">
-              </label>
-            </div>
+            <!-- Write actions toggle lives in the chat-input popover, not
+                 here. It's a per-conversation decision (matches web / bash
+                 toggles) rather than a one-time grant. -->
+
 
             <!-- Briefing — the system-prompt addendum the agent gets when GitHub is on. -->
             <div class="gh-intg-section">

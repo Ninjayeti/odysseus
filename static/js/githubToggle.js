@@ -88,7 +88,9 @@ function _renderPopover(integration) {
     _setButtonVisibility(true);
     body.classList.remove('hidden');
     empty.classList.add('hidden');
-    status.textContent = `@${integration.github_username || '?'}`;
+    // Plain username, no leading @. Some monospace-y fonts render @ at
+    // small sizes as a glyph that reads as a stray icon next to the name.
+    status.textContent = integration.github_username || '?';
     status.classList.remove('gh-status-empty');
   } else {
     // No PAT yet — hide the toolbar button entirely. Settings is the place

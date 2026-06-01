@@ -2150,7 +2150,6 @@ async function initGitHubIntegration() {
     });
     generateLink.href = `https://github.com/settings/tokens/new?${_params.toString()}`;
   }
-  const writeSw = el('gh-intg-write');
   const briefingTa = el('gh-intg-briefing');
   const briefingSave = el('gh-intg-briefing-save');
   const briefingReset = el('gh-intg-briefing-reset');
@@ -2172,18 +2171,14 @@ async function initGitHubIntegration() {
   function _render(info) {
     if (!info) return;
     if (info.configured) {
-      statusEl.textContent = `Connected as @${info.github_username || '?'}`;
+      statusEl.textContent = `Connected as ${info.github_username || '?'}`;
       patIn.placeholder = '••••••••  (replace to change)';
       patIn.value = '';
       disconnectSection.style.display = '';
-      writeSw.checked = !!info.write_enabled;
-      writeSw.disabled = false;
     } else {
       statusEl.textContent = 'Not connected';
       patIn.placeholder = 'ghp_...';
       disconnectSection.style.display = 'none';
-      writeSw.checked = false;
-      writeSw.disabled = true;
     }
     if (typeof info.briefing === 'string') {
       briefingTa.value = info.briefing;
@@ -2236,17 +2231,6 @@ async function initGitHubIntegration() {
     } finally {
       patBtn.disabled = false;
     }
-  });
-
-  writeSw.addEventListener('change', async () => {
-    try {
-      await fetch('/api/github/integration/flags', {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ write_enabled: writeSw.checked }),
-      });
-    } catch {}
   });
 
   briefingSave.addEventListener('click', async () => {
