@@ -105,6 +105,9 @@ function ensureTerm() {
     cursorStyle: 'block',
     scrollback: 5000,
     allowProposedApi: true,
+    // BEL (\x07) from the pty would otherwise audibly beep. Browser-tab
+    // bells are universally hated; mute them.
+    bellStyle: 'none',
     theme: {
       background: '#000000',
       foreground: '#e6e6e6',
@@ -201,6 +204,17 @@ function attachWebSocket(sessionId) {
 async function openTerminal() {
   const panel = $('terminal-panel');
   if (!panel) return;
+  // If the panel is already visible AND we have a live WebSocket, this is
+  // a re-click of the sidebar Terminal button while already on the terminal
+  // screen. Don't tear down + reattach — that just bounces the pty for no
+  // user-visible reason (and sometimes emits a stray BEL during reattach).
+  // Just refocus the existing terminal and return.
+  const alreadyVisible = !panel.classList.contains('hidden');
+  const wsLive = ws && ws.readyState === WebSocket.OPEN;
+  if (alreadyVisible && wsLive && term) {
+    try { term.focus(); } catch {}
+    return;
+  }
   panel.classList.remove('hidden');
 
   ensureTerm();
