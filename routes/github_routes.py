@@ -92,6 +92,7 @@ class UpdateBriefingRequest(BaseModel):
 class UpdateFlagsRequest(BaseModel):
     enabled: bool | None = None
     write_enabled: bool | None = None
+    notify_enabled: bool | None = None
 
 
 # ── Helpers ──
@@ -113,6 +114,7 @@ def _row_to_dict(row: GitHubIntegration) -> dict:
         "github_username": row.github_username,
         "enabled": bool(row.enabled),
         "write_enabled": bool(row.write_enabled),
+        "notify_enabled": bool(getattr(row, "notify_enabled", False)),
         "briefing": briefing,
         "briefing_unfilled": _briefing_is_unfilled(briefing),
         "created_at": row.created_at.isoformat() if row.created_at else None,
@@ -255,9 +257,64 @@ def setup_github_routes(mcp_manager=None):
                 row.enabled = bool(body.enabled)
             if body.write_enabled is not None:
                 row.write_enabled = bool(body.write_enabled)
+            if body.notify_enabled is not None:
+                row.notify_enabled = bool(body.notify_enabled)
             row.updated_at = datetime.utcnow()
             db.commit()
             db.refresh(row)
             return _row_to_dict(row)
+
+    # ── Notifications poll endpoint ──
+    # Cheap proxy for GET /notifications on GitHub. The frontend hits this
+    # every ~90s when notify_enabled. Server-side cache (60s) absorbs
+    # multi-tab spam so we never exceed GitHub's 60-rpm threshold even with
+    # several Odysseus windows open.
+    _POLL_CACHE_TTL = 60.0  # seconds
+
+    @router.get("/notifications/count")
+    async def notifications_count(request: Request):
+        owner = require_user(request)
+        with SessionLocal() as db:
+            row = db.query(GitHubIntegration).filter_by(owner=owner or "").first()
+            if not row or not row.enabled or not row.notify_enabled:
+                return {"count": 0, "notify_enabled": False, "cached": False}
+            now = datetime.utcnow()
+            last = row.last_notif_polled_at
+            age = (now - last).total_seconds() if last else None
+            if age is not None and age < _POLL_CACHE_TTL:
+                return {
+                    "count": int(row.last_notif_count or 0),
+                    "notify_enabled": True,
+                    "cached": True,
+                    "age_seconds": int(age),
+                }
+            # Cache stale (or never polled) — hit GitHub.
+            pat = row.pat_encrypted or ""
+            if pat.startswith("enc:"):
+                from src.secret_storage import decrypt as _decrypt
+                pat = _decrypt(pat)
+            headers = {
+                "Authorization": f"Bearer {pat}",
+                "Accept": "application/vnd.github+json",
+                "User-Agent": USER_AGENT,
+            }
+            count = 0
+            try:
+                async with httpx.AsyncClient(timeout=GH_TIMEOUT) as client:
+                    # `all=false` (default) returns only unread.
+                    resp = await client.get(f"{GH_API}/notifications", headers=headers, params={"per_page": 50})
+                if resp.status_code == 200:
+                    count = len(resp.json() or [])
+                else:
+                    logger.warning(f"github notif poll returned {resp.status_code}")
+            except Exception as e:
+                logger.warning(f"github notif poll failed: {e}")
+                # Return last-known count so a transient outage doesn't blank the badge.
+                return {"count": int(row.last_notif_count or 0), "notify_enabled": True, "cached": True, "stale": True}
+            # Persist
+            row.last_notif_count = count
+            row.last_notif_polled_at = now
+            db.commit()
+            return {"count": count, "notify_enabled": True, "cached": False}
 
     return router

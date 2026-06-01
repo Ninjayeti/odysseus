@@ -2291,6 +2291,26 @@ body.bg-pattern-sparkles {
       color: var(--accent, var(--red));
       background: color-mix(in srgb, var(--accent, var(--red)) 14%, transparent);
     }
+    /* Unread-notification count badge in the corner of the GitHub toggle.
+       Lit by githubToggle.js's poller when notify_enabled and count > 0. */
+    #gh-toggle-btn { position: relative; }
+    .gh-toggle-badge {
+      position: absolute;
+      top: -3px;
+      right: -3px;
+      min-width: 14px;
+      height: 14px;
+      padding: 0 4px;
+      border-radius: 7px;
+      background: var(--accent, var(--red));
+      color: white;
+      font-size: 9px;
+      font-weight: 700;
+      line-height: 14px;
+      text-align: center;
+      box-shadow: 0 0 0 2px var(--bg);
+      pointer-events: none;
+    }
     .gh-popover {
       /* Fixed (not absolute) so it escapes the chat-input-area stacking
          context, which otherwise traps it below the chat history regardless

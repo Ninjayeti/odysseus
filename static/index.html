@@ -219,7 +219,7 @@
       }, { once: true });
     })();
   </script>
-  <link rel="stylesheet" href="/static/style.css?v=345">
+  <link rel="stylesheet" href="/static/style.css?v=346">
   <link rel="modulepreload" href="/static/app.js">
   <link rel="modulepreload" href="/static/js/chat.js">
   <link rel="modulepreload" href="/static/js/ui.js">
@@ -2259,6 +2259,21 @@
                   <span class="gh-intg-row-hint">comments, open PRs, push to branches</span>
                 </span>
                 <input type="checkbox" class="gh-toggle-switch" id="gh-intg-write">
+              </label>
+            </div>
+
+            <!-- Notification opt-in. When ON, the frontend polls GitHub
+                 every ~90s for unread notifications and lights a dot on
+                 the chat-input GitHub button. The agent also gets a hint
+                 about unread count when GitHub is toggled on for a chat —
+                 it can mention them at a natural pause in its reply. -->
+            <div class="gh-intg-section">
+              <label class="gh-intg-row">
+                <span>
+                  Notify me about GitHub activity
+                  <span class="gh-intg-row-hint">badge on the chat-input toggle; agent may surface at a natural pause</span>
+                </span>
+                <input type="checkbox" class="gh-toggle-switch" id="gh-intg-notify">
               </label>
             </div>
 

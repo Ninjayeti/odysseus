@@ -2151,6 +2151,7 @@ async function initGitHubIntegration() {
     generateLink.href = `https://github.com/settings/tokens/new?${_params.toString()}`;
   }
   const writeSw = el('gh-intg-write');
+  const notifySw = el('gh-intg-notify');
   const briefingTa = el('gh-intg-briefing');
   const briefingSave = el('gh-intg-briefing-save');
   const briefingReset = el('gh-intg-briefing-reset');
@@ -2182,6 +2183,10 @@ async function initGitHubIntegration() {
       disconnectSection.style.display = '';
       writeSw.checked = !!info.write_enabled;
       writeSw.disabled = false;
+      if (notifySw) {
+        notifySw.checked = !!info.notify_enabled;
+        notifySw.disabled = false;
+      }
       if (tabBtn) tabBtn.style.display = '';
       if (connectedPtr) connectedPtr.style.display = '';
     } else {
@@ -2191,6 +2196,7 @@ async function initGitHubIntegration() {
       disconnectSection.style.display = 'none';
       writeSw.checked = false;
       writeSw.disabled = true;
+      if (notifySw) { notifySw.checked = false; notifySw.disabled = true; }
       if (tabBtn) tabBtn.style.display = 'none';
       if (connectedPtr) connectedPtr.style.display = 'none';
     }
@@ -2298,6 +2304,22 @@ async function initGitHubIntegration() {
       try { window.githubToggle && window.githubToggle.refresh && window.githubToggle.refresh(); } catch {}
     } catch {}
   });
+
+  // Notify toggle — simple POST to /flags. Tells the chat-input toggle to
+  // refresh so the poller starts/stops without a page reload.
+  if (notifySw) {
+    notifySw.addEventListener('change', async () => {
+      try {
+        await fetch('/api/github/integration/flags', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ notify_enabled: notifySw.checked }),
+        });
+        try { window.githubToggle && window.githubToggle.refresh && window.githubToggle.refresh(); } catch {}
+      } catch {}
+    });
+  }
 
   briefingSave.addEventListener('click', async () => {
     briefingSave.disabled = true;

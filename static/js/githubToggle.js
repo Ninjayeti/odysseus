@@ -13,9 +13,13 @@
  */
 
 const TOGGLE_KEY = 'odysseus-gh-toggle';  // persisted toggle state across reloads
+const POLL_INTERVAL_MS = 90 * 1000;        // notification-poll cadence
 
 let _writeEnabled = false;  // mirrors the server-side write_enabled flag
+let _notifyEnabled = false; // mirrors the server-side notify_enabled flag
 let _configured = false;     // mirrors `configured` from /api/github/integration
+let _pollTimer = null;       // setInterval handle for notification poller
+let _unreadCount = 0;        // most-recent unread-notif count from poller
 
 function $(id) { return document.getElementById(id); }
 
@@ -63,12 +67,64 @@ async function _refresh() {
   const info = await _fetchIntegration();
   _configured = !!(info && info.configured);
   _writeEnabled = !!(info && info.write_enabled);
+  _notifyEnabled = !!(info && info.notify_enabled);
   _setButtonVisibility(_configured);
   // If integration was deleted while toggle was on, force it off.
   if (!_configured) _setEnabled(false);
   // Re-mirror the write_enabled state into the hidden checkbox so chat.js
   // picks it up on the next submit without waiting for a click.
   _setEnabled($('gh-toggle')?.checked || false);
+  // Start / stop the notification poller based on opt-in state.
+  _syncNotifPoller();
+}
+
+// ── Notification poller ──
+// Server-side endpoint caches the GitHub /notifications call for 60s, so
+// even with multiple Odysseus tabs polling every 90s the API stays well
+// under GitHub's rate limit. The poller only runs while configured AND
+// notify_enabled — turning either off stops it immediately.
+
+async function _pollUnread() {
+  if (!_configured || !_notifyEnabled) return;
+  try {
+    const r = await fetch('/api/github/notifications/count', { credentials: 'same-origin' });
+    if (!r.ok) return;
+    const data = await r.json();
+    _unreadCount = Math.max(0, Number(data.count || 0));
+    _renderBadge();
+  } catch {}
+}
+
+function _syncNotifPoller() {
+  if (_configured && _notifyEnabled) {
+    if (!_pollTimer) {
+      _pollTimer = setInterval(_pollUnread, POLL_INTERVAL_MS);
+      // Fire one immediately so the badge is accurate on toggle-on.
+      _pollUnread();
+    }
+  } else {
+    if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; }
+    _unreadCount = 0;
+    _renderBadge();
+  }
+}
+
+function _renderBadge() {
+  const btn = $('gh-toggle-btn');
+  if (!btn) return;
+  let badge = btn.querySelector('.gh-toggle-badge');
+  if (_unreadCount > 0) {
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.className = 'gh-toggle-badge';
+      btn.appendChild(badge);
+    }
+    badge.textContent = _unreadCount > 99 ? '99+' : String(_unreadCount);
+    btn.title = `GitHub access (${_unreadCount} unread notification${_unreadCount === 1 ? '' : 's'})`;
+  } else if (badge) {
+    badge.remove();
+    btn.title = 'GitHub access (PR-aware chat)';
+  }
 }
 
 function _wireUp() {

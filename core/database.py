@@ -652,6 +652,17 @@ class GitHubIntegration(Base):
     briefing = Column(Text, nullable=True)
     enabled = Column(Boolean, default=True, nullable=False)
     write_enabled = Column(Boolean, default=False, nullable=False)
+    # Opt-in: when true, a background poller in the client checks GitHub
+    # notifications periodically and surfaces a badge on the chat-input
+    # toggle button. Default OFF — must be explicitly enabled in
+    # Settings → GitHub so the integration is silent unless invited.
+    notify_enabled = Column(Boolean, default=False, nullable=False)
+    # Cache: most recently seen unread-notification count + when we last
+    # polled GitHub for it. Server-side throttle prevents the
+    # /api/github/notifications/count endpoint from hammering GitHub when
+    # multiple tabs poll simultaneously.
+    last_notif_count = Column(Integer, default=0, nullable=False)
+    last_notif_polled_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
@@ -1551,6 +1562,36 @@ def init_db():
     _migrate_encrypt_email_passwords()
     _migrate_encrypt_signatures()
     _migrate_encrypt_endpoint_keys()
+    _migrate_add_github_notify_columns()
+
+
+def _migrate_add_github_notify_columns():
+    """Add notify_enabled / last_notif_count / last_notif_polled_at columns to
+    github_integrations (Phase C — opt-in notification badge). Idempotent."""
+    import sqlite3
+    db_path = DATABASE_URL.replace("sqlite:///", "")
+    if not os.path.exists(db_path):
+        return
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.execute("PRAGMA table_info(github_integrations)")
+        columns = {row[1] for row in cursor.fetchall()}
+        added = []
+        if columns and "notify_enabled" not in columns:
+            conn.execute("ALTER TABLE github_integrations ADD COLUMN notify_enabled BOOLEAN NOT NULL DEFAULT 0")
+            added.append("notify_enabled")
+        if columns and "last_notif_count" not in columns:
+            conn.execute("ALTER TABLE github_integrations ADD COLUMN last_notif_count INTEGER NOT NULL DEFAULT 0")
+            added.append("last_notif_count")
+        if columns and "last_notif_polled_at" not in columns:
+            conn.execute("ALTER TABLE github_integrations ADD COLUMN last_notif_polled_at DATETIME")
+            added.append("last_notif_polled_at")
+        if added:
+            conn.commit()
+            logging.getLogger(__name__).info(f"Migrated github_integrations: added {added}")
+        conn.close()
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"github_integrations notify-column migration failed: {e}")
 
 
 def _migrate_encrypt_endpoint_keys():

@@ -119,6 +119,38 @@ def _fetch_github_briefing(owner: str | None) -> str | None:
         return None
 
 
+def _fetch_github_notif_hint(owner: str | None) -> str | None:
+    """If notify_enabled AND there are unread GitHub notifications cached,
+    return a one-liner the agent should know about so it can surface the
+    count at a natural pause in its reply. None if no notifications, notify
+    disabled, or no cached count yet (poller hasn't run).
+
+    Deliberately NOT a tool call — this is passive info the agent can mention
+    in its prose, distinct from gh_get_notifications which the agent would
+    invoke when explicitly asked 'what's new'."""
+    try:
+        from core.database import SessionLocal as _SL, GitHubIntegration as _GI
+    except Exception:
+        return None
+    try:
+        with _SL() as db:
+            row = db.query(_GI).filter_by(owner=owner or "").first()
+        if not row or not row.enabled or not row.notify_enabled:
+            return None
+        count = int(getattr(row, "last_notif_count", 0) or 0)
+        if count <= 0:
+            return None
+        plural = "" if count == 1 else "s"
+        return (
+            f"FYI for the agent (do not volunteer for every reply, only if "
+            f"relevant or at a natural pause): the user has {count} unread "
+            f"GitHub notification{plural}. They can call gh_get_notifications "
+            f"to see details if asked."
+        )
+    except Exception:
+        return None
+
+
 def setup_chat_routes(
     session_manager,
     chat_handler,
@@ -349,9 +381,16 @@ def setup_chat_routes(
         # in play don't pay the token cost.
         _extra_prompts: list[str] = []
         if str(allow_github).lower() == "true":
-            _brief = _fetch_github_briefing(getattr(sess, "owner", None) or "")
+            _owner_for_gh = getattr(sess, "owner", None) or ""
+            _brief = _fetch_github_briefing(_owner_for_gh)
             if _brief:
                 _extra_prompts.append(_brief)
+            # Notification hint — opt-in via notify_enabled. Surfaces the
+            # cached unread count so the agent can mention it at a natural
+            # pause. Won't fire if the user hasn't enabled notifications.
+            _notif = _fetch_github_notif_hint(_owner_for_gh)
+            if _notif:
+                _extra_prompts.append(_notif)
 
         # Build shared context (stream path uses enhanced_message for context preface)
         ctx = await build_chat_context(
