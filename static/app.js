@@ -1510,7 +1510,12 @@ function initializeEventListeners() {
     const state = loadToggleState();
     const key = _modeKey(stateKey, mode);
     if (Object.prototype.hasOwnProperty.call(state, key)) return !!state[key];
-    return mode === 'agent'; // default: ON in agent, OFF in chat
+    // Fork default: tools (web, bash) ON in both chat and agent modes.
+    // Explicit user toggle-offs still persist via the localStorage check
+    // above, so flipping a tool off keeps it off the next session.
+    // Upstream defaults this to `mode === 'agent'` — see commit history if
+    // restoring upstream-compatible behavior is needed for a PR.
+    return true;
   }
 
   function saveToolPref(stateKey, mode, value) {

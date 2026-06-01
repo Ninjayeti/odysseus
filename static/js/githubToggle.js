@@ -28,7 +28,13 @@ async function _fetchIntegration() {
 }
 
 function _loadToggle() {
-  try { return localStorage.getItem(TOGGLE_KEY) === 'true'; } catch { return false; }
+  // Fork default: on. Once the user has GitHub configured, the toggle
+  // defaults to ON for every new session — same philosophy as web/bash
+  // in app.js's loadToolPref. Explicit off persists via localStorage.
+  try {
+    const v = localStorage.getItem(TOGGLE_KEY);
+    return v === null ? true : v === 'true';
+  } catch { return true; }
 }
 function _saveToggle(val) {
   try { localStorage.setItem(TOGGLE_KEY, String(!!val)); } catch {}
