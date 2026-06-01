@@ -2280,6 +2280,13 @@ body.bg-pattern-sparkles {
     /* ── GitHub integration toggle + popover ──
        The icon button shares .input-icon-btn styles with web/bash. The popover
        is anchored to #gh-toggle-wrap and opens above the chat input. */
+    .gh-toggle-wrap {
+      /* Sits in a flex row alongside other input-icon-btn elements; inline-block
+         keeps it from collapsing the row when JS toggles its display via
+         `style.display = ''`. */
+      display: inline-block;
+      position: relative;
+    }
     #gh-toggle-btn.active {
       color: var(--accent, var(--red));
       background: color-mix(in srgb, var(--accent, var(--red)) 14%, transparent);

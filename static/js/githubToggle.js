@@ -69,6 +69,15 @@ function _syncPopoverFromState() {
   }
 }
 
+/** Show or hide the entire chat-input button based on whether the user has
+ * configured the integration. Pre-config the button isn't useful — there's
+ * nothing it can toggle on — so hiding it avoids cluttering the toolbar
+ * for users who haven't set up GitHub. Surfaces once a PAT lands. */
+function _setButtonVisibility(visible) {
+  const wrap = $('gh-toggle-wrap');
+  if (wrap) wrap.style.display = visible ? '' : 'none';
+}
+
 /** Show the configured / empty state appropriately. */
 function _renderPopover(integration) {
   const status = $('gh-popover-status');
@@ -76,11 +85,15 @@ function _renderPopover(integration) {
   const empty = $('gh-popover-empty');
   if (!body || !empty || !status) return;
   if (integration && integration.configured) {
+    _setButtonVisibility(true);
     body.classList.remove('hidden');
     empty.classList.add('hidden');
     status.textContent = `@${integration.github_username || '?'}`;
     status.classList.remove('gh-status-empty');
   } else {
+    // No PAT yet — hide the toolbar button entirely. Settings is the place
+    // to set it up, not a stray popover in the chat input.
+    _setButtonVisibility(false);
     body.classList.add('hidden');
     empty.classList.remove('hidden');
     status.textContent = 'Not configured';
@@ -120,7 +133,7 @@ async function _openPopover() {
   _renderPopover(_integration);
 }
 
-function _wireUp() {
+async function _wireUp() {
   const btn = $('gh-toggle-btn');
   const pop = $('gh-popover');
   if (!btn || !pop) return;  // markup not present (e.g. compare mode strips toolbar)
@@ -130,6 +143,13 @@ function _wireUp() {
   // open and would re-disable.
   _setReadEnabled(_loadToggle(TOGGLE_KEY, false));
   _setWriteEnabled(_loadToggle(WRITE_KEY, false));
+
+  // Initial fetch — drives the button's visibility. Configured = visible,
+  // not-configured = hidden until the user sets up a PAT in Settings.
+  // The settings card calls window.githubToggle.refresh() after save/delete
+  // so this also re-runs on those events without a page reload.
+  _integration = await _fetchIntegration();
+  _renderPopover(_integration);
 
   btn.addEventListener('click', (e) => {
     e.stopPropagation();
