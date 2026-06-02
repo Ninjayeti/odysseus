@@ -46,6 +46,15 @@ _XML_PARAM_RE = re.compile(
     r'<parameter\s+name=["\'](\w+)["\']>([\s\S]*?)</parameter>',
     re.IGNORECASE,
 )
+# Pattern 3b: <tool_call name="Read">{json args}</tool_call> — deepseek-v4-pro
+# dialect: the tool name is an ATTRIBUTE on <tool_call> (not a nested <invoke>),
+# and the body is a raw JSON args object. The _XML_TOOL_CALL_RE above requires a
+# bare `<tool_call>` (no attrs), so it misses this entirely and the call leaks
+# into the chat as text. This catches it.
+_XML_NAMED_TOOL_CALL_RE = re.compile(
+    r'<(?:[\w]+:)?(?:tool_call|function_call)\s+name=["\'](\w+)["\']\s*>([\s\S]*?)</(?:[\w]+:)?(?:tool_call|function_call)>',
+    re.IGNORECASE,
+)
 
 # Pattern 4: <tool_code> blocks (MiniMax-M2.5 style)
 # {tool => 'tool_name', args => '<param>value</param>'}
@@ -267,6 +276,33 @@ def _parse_xml_invoke(inv_match) -> Optional[ToolBlock]:
     return function_call_to_tool_block(tool_name, json.dumps(params))
 
 
+def _parse_named_tool_call(name: str, body: str) -> Optional[ToolBlock]:
+    """Parse <tool_call name="X">BODY</tool_call> (deepseek-v4-pro dialect).
+
+    BODY is usually a JSON args object ({"file_path": "..."}); occasionally
+    <parameter> tags. Routes through function_call_to_tool_block — the SAME
+    canonical converter native calls and <invoke> use — so the full tool set and
+    correct per-tool content shaping apply (a capitalized 'Read' maps to
+    read_file, etc.)."""
+    tool_name = name.lower()
+    body = (body or "").strip()
+    from src.tool_schemas import function_call_to_tool_block
+    # JSON args — the common shape for this dialect.
+    if body.startswith("{"):
+        try:
+            json.loads(body)  # validate before handing off
+            return function_call_to_tool_block(tool_name, body)
+        except (json.JSONDecodeError, ValueError):
+            pass
+    # <parameter name="...">value</parameter> tags.
+    params = {}
+    for pm in _XML_PARAM_RE.finditer(body):
+        params[pm.group(1)] = pm.group(2).strip()
+    if params:
+        return function_call_to_tool_block(tool_name, json.dumps(params))
+    return None
+
+
 def _parse_tool_code_block(raw: str) -> Optional[ToolBlock]:
     """Parse a <tool_code>{tool => 'name', args => '...'}</tool_code> block (MiniMax style)."""
     # Extract tool name
@@ -374,6 +410,12 @@ def parse_tool_blocks(text: str) -> List[ToolBlock]:
                 block = _parse_xml_invoke(inv)
                 if block:
                     blocks.append(block)
+        # Try named: <tool_call name="X">{json}</tool_call> (deepseek-v4-pro)
+        if not blocks:
+            for m in _XML_NAMED_TOOL_CALL_RE.finditer(text):
+                block = _parse_named_tool_call(m.group(1), m.group(2))
+                if block:
+                    blocks.append(block)
         # Try bare <invoke> without wrapper
         if not blocks:
             for inv in _XML_INVOKE_RE.finditer(text):
@@ -399,6 +441,7 @@ def strip_tool_blocks(text: str) -> str:
     cleaned = _TOOL_BLOCK_RE.sub('', text)
     cleaned = _TOOL_CALL_RE.sub('', cleaned)
     cleaned = _XML_TOOL_CALL_RE.sub('', cleaned)
+    cleaned = _XML_NAMED_TOOL_CALL_RE.sub('', cleaned)
     cleaned = _TOOL_CODE_RE.sub('', cleaned)
     # Strip bare <invoke> blocks not wrapped in <tool_call>
     cleaned = re.sub(r'<invoke\s+name=["\'].*?</invoke>', '', cleaned, flags=re.DOTALL | re.IGNORECASE)

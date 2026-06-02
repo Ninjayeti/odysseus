@@ -1060,9 +1060,12 @@ def function_call_to_tool_block(name: str, arguments: str) -> Optional[ToolBlock
     elif tool_type == "web_search":
         content = args.get("query", "")
     elif tool_type == "read_file":
-        content = args.get("path", "")
+        # Accept "file_path" too — it's the key Claude/deepseek emit by default
+        # (our schema says "path", but models trained on the Claude tool schema
+        # send "file_path", and silently getting "" means the read never runs).
+        content = args.get("path") or args.get("file_path") or ""
     elif tool_type == "write_file":
-        content = args.get("path", "") + "\n" + args.get("content", "")
+        content = (args.get("path") or args.get("file_path") or "") + "\n" + args.get("content", "")
     elif tool_type == "create_document":
         parts = [args.get("title", "Untitled")]
         if args.get("language"):
