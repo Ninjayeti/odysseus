@@ -396,6 +396,18 @@ const DSML_STRAY_RE = /<\s*\/?\s*[｜|]+\s*DSML\s*[｜|]+[^>]*>/gi;
 // Self-narration about tool results (model echoing stdout/exit_code)
 const TOOL_NARRATION_RE = /(?:The (?:result|output) shows?:?\s*)?-?\s*(?:stdout|stderr|exit_code):\s*.+/gi;
 
+// Hive hop suggestion sentinel — emitted by models to suggest switching
+const HOP_SUGGEST_RE = /\[\[HOP_SUGGEST:(\w+):([^\]]+)\]\]\s*/g;
+
+// Lane display names and colors for hop suggestions
+const HOP_LANES = {
+  claude:   { name: 'Claude',   color: '#cc785c' },
+  codex:    { name: 'Codex',    color: '#10a37f' },
+  gemini:   { name: 'Gemini',   color: '#4285f4' },
+  deepseek: { name: 'DeepSeek', color: '#536dfe' },
+  kimi:     { name: 'Kimi',     color: '#ff6b35' },
+  local:    { name: 'Local',    color: '#8bc34a' },
+};
 
 // Model pricing table — per million tokens
 // Model info: pricing (per 1M tokens) + context window length
@@ -2007,6 +2019,15 @@ export function addMessage(role, content, modelName, metadata) {
 
     let text = markdownModule.squashOutsideCode(stripToolBlocks(textRaw || ''));
 
+    // Extract hop suggestions before markdown rendering
+    const _hopSuggestions = [];
+    if (role === 'assistant') {
+      text = text.replace(HOP_SUGGEST_RE, (_m, lane, reason) => {
+        _hopSuggestions.push({ lane: lane.toLowerCase(), reason: reason.trim() });
+        return '';
+      });
+    }
+
     // For user messages, pull out vision-model image descriptions ([Image: name]\n
     // <multi-line desc>) into a collapsible "image description" section. Done for
     // ALL user messages (not just ones with attachment metadata) so it rebuilds
@@ -2094,6 +2115,35 @@ export function addMessage(role, content, modelName, metadata) {
       if (attachments?.length) {
         b.appendChild(buildAttachCards(attachments));
       }
+    }
+
+    // Render hop suggestion cards (Hive model-hop protocol)
+    if (_hopSuggestions.length > 0) {
+      _hopSuggestions.forEach(hop => {
+        const lane = HOP_LANES[hop.lane] || { name: hop.lane, color: '#888' };
+        const card = document.createElement('div');
+        card.className = 'hop-suggest-card';
+        card.style.borderLeftColor = lane.color;
+        card.innerHTML =
+          `<div class="hop-suggest-header">` +
+            `<span class="hop-suggest-icon">⇄</span>` +
+            `<span class="hop-suggest-lane" style="color:${lane.color}">${uiModule.esc(lane.name)}</span>` +
+            `<span class="hop-suggest-reason">${uiModule.esc(hop.reason)}</span>` +
+          `</div>` +
+          `<div class="hop-suggest-actions">` +
+            `<button class="hop-accept-btn" data-lane="${uiModule.esc(hop.lane)}">Switch</button>` +
+            `<button class="hop-dismiss-btn">Stay</button>` +
+          `</div>`;
+        card.querySelector('.hop-accept-btn').addEventListener('click', () => {
+          document.dispatchEvent(new CustomEvent('odysseus:hop-accept', { detail: hop }));
+          card.remove();
+        });
+        card.querySelector('.hop-dismiss-btn').addEventListener('click', () => {
+          card.classList.add('hop-dismissed');
+          setTimeout(() => card.remove(), 300);
+        });
+        b.appendChild(card);
+      });
     }
 
     wrap.appendChild(r);
