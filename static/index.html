@@ -1180,7 +1180,7 @@
                so the chat/agent split no longer exists. The buttons stay in the
                DOM (mode-agent-btn keeps `active`) so the JS that reads mode and
                shows the tool buttons keeps working; they're just not shown. -->
-          <div class="mode-toggle" style="display:none">
+          <div class="mode-toggle" style="display:none !important">
             <button type="button" class="mode-toggle-btn active" id="mode-agent-btn">Agent</button>
             <button type="button" class="mode-toggle-btn" id="mode-chat-btn">Chat</button>
           </div>
@@ -1891,10 +1891,10 @@
                 <span class="vis-label">More Tools <span class="vis-hint">Overflow menu</span></span>
                 <input type="checkbox" checked data-ui-key="overflow-plus-btn"><span class="vis-switch"></span>
               </label>
-              <label class="vis-row">
+              <label class="vis-row" style="display:none">
                 <span class="vis-icon vis-icon-text">A|C</span>
                 <span class="vis-label">Agent / Chat <span class="vis-hint">Mode switcher</span></span>
-                <input type="checkbox" checked data-ui-key="mode-toggle"><span class="vis-switch"></span>
+                <input type="checkbox" data-ui-key="mode-toggle"><span class="vis-switch"></span>
               </label>
               <label class="vis-row">
                 <span class="vis-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></span>

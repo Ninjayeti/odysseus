@@ -8,48 +8,14 @@ import { sortModelObjects } from './modelSort.js';
 
 const API_BASE = window.location.origin;
 
-// ── Recent + Favorites persistence ──
-// Recent is auto-tracked (last 5 picks, most-recent-first) and lives in its
-// own key. Favorites is the SAME key the sidebar Models section uses, so a
-// favorite toggled here shows up there and vice-versa.
+// localStorage keys for the picker's two persisted lists.
+//   FAV_KEY    — manual favorites, toggled by the user.
+//   RECENT_KEY — auto, most-recent-first list of the last MAX_RECENT picks.
+// Recent + Favorites are the only sections the picker ever shows when not
+// searching; everything else lives behind the search bar.
+const FAV_KEY = 'odysseus-model-favorites';
 const RECENT_KEY = 'odysseus-model-recent';
-const FAVORITES_KEY = 'odysseus-model-favorites';
-const RECENT_MAX = 5;
-// Catalogs at or below this size are small enough that hiding everything
-// behind search would be a regression — keep listing them in browse mode.
-const BROWSE_ALL_LIMIT = 12;
-
-function _loadList(key) {
-  try {
-    const a = JSON.parse(localStorage.getItem(key) || '[]');
-    return Array.isArray(a) ? a : [];
-  } catch { return []; }
-}
-function _saveList(key, list) {
-  try { localStorage.setItem(key, JSON.stringify(list)); } catch { /* quota / private mode */ }
-}
-function _loadRecent() { return _loadList(RECENT_KEY); }
-function _pushRecent(mid) {
-  if (!mid) return;
-  const next = _loadRecent().filter(x => x !== mid);
-  next.unshift(mid);
-  _saveList(RECENT_KEY, next.slice(0, RECENT_MAX));
-}
-function _loadFavorites() { return _loadList(FAVORITES_KEY); }
-function _toggleFavorite(mid) {
-  const favs = _loadFavorites();
-  const i = favs.indexOf(mid);
-  if (i >= 0) favs.splice(i, 1);
-  else favs.push(mid);
-  _saveList(FAVORITES_KEY, favs);
-  // Keep the sidebar Models section (same key) in sync if it's mounted.
-  try {
-    if (window.modelsModule && typeof window.modelsModule.refreshModels === 'function') {
-      window.modelsModule.refreshModels();
-    }
-  } catch { /* sidebar not present */ }
-  return i < 0; // true when now favorited
-}
+const MAX_RECENT = 5;
 
 // ── Shared keyboard nav for model pickers ──
 function _handlePickerKeydown(e, listEl, itemSelector, closeFn) {
@@ -195,12 +161,6 @@ function _initModelPickerDropdown() {
           url: item.url,
           endpointId: item.endpoint_id,
           epName: item.endpoint_name || '',
-          providerText: [
-            item.endpoint_name || '',
-            item.category || '',
-            item.host || '',
-            item.url || '',
-          ].filter(Boolean).join(' '),
           stale: isLocalDead,
           staleReason: isLocalDead ? (probeResult.error || 'not responding') : '',
         });
@@ -209,58 +169,10 @@ function _initModelPickerDropdown() {
     return sortModelObjects(result);
   }
 
-  // ── Provider display names and grouping ──
-  const _PROVIDER_NAMES = {
-    '01-ai': 'Yi', 'abacusai': 'Abacus AI', 'adept': 'Adept',
-    'ai21': 'AI21 Labs', 'ai21labs': 'AI21 Labs', 'aion-labs': 'Aion Labs',
-    'aisingapore': 'AI Singapore', 'allenai': 'Allen AI', 'amazon': 'Amazon',
-    'anthracite-org': 'Anthracite', 'anthropic': 'Anthropic', 'arcee-ai': 'Arcee AI',
-    'baai': 'BAAI', 'baidu': 'Baidu', 'bigcode': 'BigCode',
-    'black-forest-labs': 'Black Forest Labs', 'bytedance': 'ByteDance',
-    'bytedance-seed': 'ByteDance', 'cognitivecomputations': 'Cognitive Computations',
-    'cohere': 'Cohere', 'databricks': 'Databricks', 'deepcogito': 'DeepCogito',
-    'deepseek': 'DeepSeek', 'deepseek-ai': 'DeepSeek', 'essentialai': 'Essential AI',
-    'google': 'Google', 'gryphe': 'Gryphe', 'ibm': 'IBM',
-    'ibm-granite': 'IBM Granite', 'inception': 'Inception',
-    'inclusionai': 'Inclusion AI', 'inflection': 'Inflection',
-    'kwaipilot': 'KwaiPilot', 'liquid': 'Liquid AI', 'mancer': 'Mancer',
-    'meta': 'Llama', 'meta-llama': 'Llama', 'microsoft': 'Microsoft',
-    'minimax': 'MiniMax', 'minimaxai': 'MiniMax', 'mistralai': 'Mistral',
-    'moonshotai': 'Moonshot', 'morph': 'Morph', 'nex-agi': 'Nex AGI',
-    'nousresearch': 'Nous Research', 'nv-mistralai': 'NVIDIA x Mistral',
-    'nvidia': 'NVIDIA', 'openai': 'OpenAI', 'openrouter': 'OpenRouter',
-    'perceptron': 'Perceptron', 'perplexity': 'Perplexity', 'poolside': 'Poolside',
-    'prime-intellect': 'Prime Intellect', 'qwen': 'Qwen', 'rekaai': 'Reka',
-    'relace': 'Relace', 'sao10k': 'Sao10k', 'sarvamai': 'Sarvam AI',
-    'snowflake': 'Snowflake', 'stepfun': 'StepFun', 'stepfun-ai': 'StepFun',
-    'stockmark': 'Stockmark', 'switchpoint': 'SwitchPoint', 'tencent': 'Tencent',
-    'thedrummer': 'TheDrummer', 'undi95': 'Undi95', 'upstage': 'Upstage',
-    'writer': 'Writer', 'x-ai': 'xAI', 'xiaomi': 'Xiaomi',
-    'z-ai': 'Zhipu', 'zyphra': 'Zyphra',
-    '~anthropic': 'Anthropic', '~google': 'Google',
-    '~moonshotai': 'Moonshot', '~openai': 'OpenAI',
-  };
-  const _PROVIDER_ALIAS = {
-    'meta-llama': 'meta', 'deepseek': 'deepseek-ai', 'minimaxai': 'minimax',
-    'stepfun-ai': 'stepfun', 'ai21labs': 'ai21', 'ibm-granite': 'ibm',
-    'bytedance-seed': 'bytedance', '~anthropic': 'anthropic',
-    '~google': 'google', '~moonshotai': 'moonshotai', '~openai': 'openai',
-  };
-  function _providerDisplayName(slug) {
-    return _PROVIDER_NAMES[slug] || slug.charAt(0).toUpperCase() + slug.slice(1).replace(/-/g, ' ');
-  }
-  function _providerSlug(mid) {
-    const slash = mid.indexOf('/');
-    let slug = slash > 0 ? mid.substring(0, slash) : 'other';
-    return _PROVIDER_ALIAS[slug] || slug;
-  }
-  const _collapsedProviders = new Set(_loadList('odysseus-model-collapsed'));
-  let _justExpandedProvider = null;
-
   function _populate(filter) {
     listEl.innerHTML = '';
     const all = _getAllModels();
-    const q = (filter || '').trim().toLowerCase();
+    const q = (filter || '').toLowerCase();
     const hasAnyModel = all.length > 0;
     listEl.classList.toggle('is-empty', !hasAnyModel);
     menu.classList.toggle('no-models', !hasAnyModel);
@@ -268,17 +180,12 @@ function _initModelPickerDropdown() {
       search.placeholder = hasAnyModel ? 'Search models…' : 'No models connected';
     }
     if (searchRow) {
-      searchRow.classList.toggle('searching', !!q);
+      searchRow.classList.toggle('searching', !!filter);
     }
 
-    if (!hasAnyModel) return; // collapsed empty list — nothing to render
-
-    // Unique lookup so Recent/Favorites (stored as bare model IDs) can be
-    // resolved back to full model objects; drops anything no longer offered.
-    const byId = new Map();
-    all.forEach(m => { if (!byId.has(m.mid)) byId.set(m.mid, m); });
-
-    const favs = _loadFavorites();
+    // Load favorites (manual) + recents (auto, last 5 picks).
+    const favs = (function() { try { return JSON.parse(localStorage.getItem(FAV_KEY) || '[]'); } catch { return []; } })();
+    const recents = (function() { try { return JSON.parse(localStorage.getItem(RECENT_KEY) || '[]'); } catch { return []; } })();
 
     function _addSection(label) {
       const el = document.createElement('div');
@@ -286,13 +193,7 @@ function _initModelPickerDropdown() {
       el.textContent = label;
       listEl.appendChild(el);
     }
-    function _addEmpty(text) {
-      const empty = document.createElement('div');
-      empty.className = 'model-switch-empty';
-      empty.textContent = text;
-      listEl.appendChild(empty);
-    }
-    function _addRow(m) {
+    function _addRow(m, container) {
       const row = document.createElement('div');
       row.className = 'model-switch-item';
       if (m.stale) {
@@ -309,7 +210,7 @@ function _initModelPickerDropdown() {
         row.appendChild(logoSpan);
       }
       const nameSpan = document.createElement('span');
-      nameSpan.className = 'mp-model-name';
+      nameSpan.className = 'model-switch-name';
       nameSpan.textContent = m.display;
       row.appendChild(nameSpan);
       if (m.stale) {
@@ -326,129 +227,78 @@ function _initModelPickerDropdown() {
       epSpan.textContent = _epDisplay;
       row.appendChild(epSpan);
 
-      // Inline favorite dot — toggles favorite, never picks the model.
-      const favDot = document.createElement('button');
-      favDot.type = 'button';
-      favDot.className = 'mp-fav-dot' + (favs.includes(m.mid) ? ' active' : '');
-      favDot.textContent = '●';
-      const _setFavState = (on) => {
-        favDot.classList.toggle('active', on);
-        favDot.title = on ? 'Remove from favorites' : 'Add to favorites';
-        favDot.setAttribute('aria-label', on ? 'Remove from favorites' : 'Add to favorites');
-        favDot.setAttribute('aria-pressed', on ? 'true' : 'false');
-      };
-      _setFavState(favs.includes(m.mid));
-      favDot.addEventListener('click', (e) => {
+      // Star toggle — inline favoriting without leaving the picker. Filled
+      // when this model is in the favorites list, outline otherwise. The
+      // sidebar Models section also writes to FAV_KEY, so they stay in
+      // sync via the shared localStorage key.
+      const favBtn = document.createElement('button');
+      favBtn.type = 'button';
+      const isFav = favs.includes(m.mid);
+      favBtn.className = 'model-switch-fav' + (isFav ? ' active' : '');
+      favBtn.textContent = isFav ? '★' : '☆';
+      favBtn.title = isFav ? 'Unfavorite' : 'Favorite';
+      favBtn.addEventListener('click', (e) => {
         e.stopPropagation();
-        const nowFav = _toggleFavorite(m.mid);
-        _setFavState(nowFav);
-        favDot.classList.remove('pulse');
-        void favDot.offsetWidth;
-        favDot.classList.add('pulse');
-        // Keep our in-memory copy aligned so a follow-up re-render is correct.
-        const idx = favs.indexOf(m.mid);
-        if (nowFav && idx < 0) favs.push(m.mid);
-        else if (!nowFav && idx >= 0) favs.splice(idx, 1);
-        if (uiModule && uiModule.showToast) uiModule.showToast(nowFav ? 'Favorited' : 'Unfavorited');
-        // In browse mode the Favorites section membership changed — rebuild
-        // (cheap: Recent + Favorites). In search mode the row stays put, so
-        // the in-place favorite update above is enough.
-        if (!q) {
-          const st = listEl.scrollTop;
-          _populate('');
-          listEl.scrollTop = st;
-        }
+        try {
+          const cur = JSON.parse(localStorage.getItem(FAV_KEY) || '[]');
+          const idx = cur.indexOf(m.mid);
+          if (idx >= 0) cur.splice(idx, 1);
+          else cur.push(m.mid);
+          localStorage.setItem(FAV_KEY, JSON.stringify(cur));
+        } catch {}
+        _populate(search.value || '');
       });
-      row.appendChild(favDot);
+      row.appendChild(favBtn);
 
       row.addEventListener('click', () => _pick(m));
-      listEl.appendChild(row);
+      (container || listEl).appendChild(row);
     }
 
-    // ── Search mode: flat, filtered results across the whole catalog ──
+    // Two render modes:
+    //   - Searching (q non-empty): one flat sorted result list, no sections.
+    //   - Browsing (q empty): Recent (top) + Favorites (below). Nothing else.
+    // We deliberately don't render an "All models" or per-provider section in
+    // the picker — the catalog can be hundreds of models long (OpenRouter
+    // returns 350+) and dumping them here makes the picker a wall. Discovery
+    // is the search bar's job; the picker is the quick-switch.
     if (q) {
-      const matches = all.filter(m => {
-        const provName = _providerDisplayName(_providerSlug(m.mid)).toLowerCase();
-        return [m.mid, m.display, m.epName, m.providerText, provName]
-          .filter(Boolean).join(' ').toLowerCase().includes(q);
-      });
-      if (matches.length === 0) _addEmpty('No matching models');
-      else matches.forEach(_addRow);
-      return;
-    }
-
-    // ── Browse mode: Recent (auto) + Favorites (manual). No flat "All" dump. ──
-    const shown = new Set();
-    const recentModels = _loadRecent()
-      .map(id => byId.get(id))
-      .filter(Boolean)
-      .slice(0, RECENT_MAX);
-    const favModels = favs.map(id => byId.get(id)).filter(Boolean);
-
-    if (recentModels.length) {
-      _addSection('Recent');
-      recentModels.forEach(m => { shown.add(m.mid); _addRow(m); });
-    }
-    if (favModels.length) {
-      _addSection('Favorites');
-      favModels.forEach(m => { shown.add(m.mid); _addRow(m); });
-    }
-
-    // Small catalogs: still list everything so users aren't forced to search.
-    if (all.length <= BROWSE_ALL_LIMIT) {
-      const rest = all.filter(m => !shown.has(m.mid));
-      if (rest.length) {
-        if (shown.size) _addSection('All models');
-        rest.forEach(_addRow);
-      }
+      const matches = all.filter(m =>
+        m.mid.toLowerCase().includes(q) || m.display.toLowerCase().includes(q)
+      );
+      sortModelObjects(matches).forEach(m => _addRow(m, listEl));
     } else {
-      // Large catalog: show provider groups with collapsible sections.
-      const rest = all.filter(m => !shown.has(m.mid));
-      const groups = new Map();
-      rest.forEach(m => {
-        const slug = _providerSlug(m.mid);
-        if (!groups.has(slug)) groups.set(slug, []);
-        groups.get(slug).push(m);
-      });
-      const sorted = [...groups.keys()].sort((a, b) =>
-        _providerDisplayName(a).localeCompare(_providerDisplayName(b)));
+      // Recent: most-recent-first, capped at MAX_RECENT, only models still in
+      // the catalog (so stale IDs don't render as dead rows).
+      const byId = new Map(all.map(m => [m.mid, m]));
+      const recentModels = recents
+        .map(id => byId.get(id))
+        .filter(Boolean)
+        .slice(0, MAX_RECENT);
+      const recentSet = new Set(recentModels.map(m => m.mid));
+      const favModels = favs
+        .map(id => byId.get(id))
+        .filter(m => m && !recentSet.has(m.mid));  // Don't double-list a model that's in both
 
-      sorted.forEach(provider => {
-        const models = groups.get(provider);
-        const isCollapsed = _collapsedProviders.has(provider);
-        const header = document.createElement('div');
-        header.className = 'mp-provider-header';
-        header.innerHTML =
-          `<svg class="mp-provider-chevron${isCollapsed ? ' collapsed' : ''}" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>`
-          + `<span class="mp-provider-name">${_providerDisplayName(provider)}</span>`
-          + `<span class="mp-provider-count">${models.length}</span>`;
-        header.addEventListener('click', (e) => {
-          e.stopPropagation();
-          if (_collapsedProviders.has(provider)) {
-            _collapsedProviders.delete(provider);
-            _justExpandedProvider = provider;
-          } else {
-            _collapsedProviders.add(provider);
-            _justExpandedProvider = null;
-          }
-          _saveList('odysseus-model-collapsed', [..._collapsedProviders]);
-          const st = listEl.scrollTop;
-          _populate('');
-          listEl.scrollTop = st;
-        });
-        listEl.appendChild(header);
-        if (!isCollapsed) {
-          const group = document.createElement('div');
-          group.className = 'mp-provider-group' + (_justExpandedProvider === provider ? ' mp-just-expanded' : '');
-          models.forEach(m => {
-            _addRow(m);
-            // Move the just-appended row into the group container
-            group.appendChild(listEl.lastElementChild);
-          });
-          listEl.appendChild(group);
-          if (_justExpandedProvider === provider) _justExpandedProvider = null;
-        }
-      });
+      if (recentModels.length > 0) {
+        _addSection('Recent');
+        recentModels.forEach(m => _addRow(m, listEl));
+      }
+      if (favModels.length > 0) {
+        _addSection('Favorites');
+        sortModelObjects(favModels).forEach(m => _addRow(m, listEl));
+      }
+    }
+
+    if (listEl.children.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'model-switch-empty';
+      if (!hasAnyModel) {
+        return;  // The .no-models class on `menu` handles this state's copy.
+      }
+      empty.textContent = q
+        ? 'No matching models'
+        : `Search ${all.length} model${all.length === 1 ? '' : 's'} above`;
+      listEl.appendChild(empty);
     }
   }
 
@@ -456,9 +306,14 @@ function _initModelPickerDropdown() {
     const currentSessionId = _deps.getCurrentSessionId();
     const _pendingChat = _deps.getPendingChat();
 
-    // Remember this pick so it surfaces under "Recent" next time the picker
-    // opens — the whole point of quick-switch.
-    if (m && m.mid) _pushRecent(m.mid);
+    // Update Recent: push to front, dedupe, cap. This is what makes the
+    // picker "self-teach" — pick a model once and it shows up in the Recent
+    // section next open, so the user never has to find it via search again.
+    try {
+      const prior = JSON.parse(localStorage.getItem(RECENT_KEY) || '[]');
+      const next = [m.mid, ...prior.filter(id => id !== m.mid)].slice(0, MAX_RECENT);
+      localStorage.setItem(RECENT_KEY, JSON.stringify(next));
+    } catch {}
 
     // Broadcast immediately so listeners (e.g. the tour) can advance without
     // waiting for the async session-create/PATCH that follows.
@@ -536,7 +391,6 @@ function _initModelPickerDropdown() {
           url: item.url || detail.url || '',
           endpointId: item.endpoint_id || detail.endpointId || '',
           epName: item.endpoint_name || detail.endpointName || '',
-          providerText: [item.endpoint_name || detail.endpointName || '', item.url || detail.url || ''].filter(Boolean).join(' '),
         };
         break;
       }
@@ -548,7 +402,6 @@ function _initModelPickerDropdown() {
         url: detail.url,
         endpointId: detail.endpointId || '',
         epName: detail.endpointName || '',
-        providerText: [detail.endpointName || '', detail.url || ''].filter(Boolean).join(' '),
       };
     }
     if (match) await _pick(match);
