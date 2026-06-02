@@ -503,6 +503,21 @@ FUNCTION_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "canvas_sync",
+            "description": "Query the student's Canvas LMS: upcoming assignments, missing work, courses, inbox. Reads from CanvasSync config — no setup needed.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["assignments", "missing", "courses", "inbox"],
+                               "description": "assignments=upcoming due, missing=overdue/unsubmitted, courses=active course list, inbox=recent messages"}
+                },
+                "required": ["action"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "ask_teacher",
             "description": "Ask a more capable AI model for help when stuck on a difficult problem. The teacher provides guidance that can be saved as a learned skill.",
             "parameters": {

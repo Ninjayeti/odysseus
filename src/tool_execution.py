@@ -686,6 +686,14 @@ async def execute_tool_block(
         first_line = content.split("\n")[0].strip()[:60]
         desc = f"api_call: {first_line}"
         result = await do_api_call(content)
+    elif tool == "canvas_sync":
+        try:
+            args = json.loads(content)
+        except Exception:
+            args = {"action": content.strip()}
+        desc = f"canvas_sync: {args.get('action', '?')}"
+        from src.canvas_integration import canvas_tool
+        result = await canvas_tool(**args)
     elif tool == "manage_endpoints":
         desc = "manage_endpoints"
         result = await do_manage_endpoints(content, owner=owner)

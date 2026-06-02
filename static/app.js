@@ -886,14 +886,20 @@ function initializeEventListeners() {
   document.addEventListener('odysseus:hop-accept', (e) => {
     const lane = e.detail?.lane;
     if (!lane) return;
-    // Search available models for a match on the lane name
     const picker = document.getElementById('model-picker-btn');
     if (picker) {
       picker.click();
       setTimeout(() => {
         const search = document.getElementById('model-picker-search');
-        if (search) { search.value = lane; search.dispatchEvent(new Event('input')); }
-      }, 100);
+        if (search) {
+          search.value = lane;
+          search.dispatchEvent(new Event('input'));
+          search.focus();
+        }
+        if (uiModule && uiModule.showToast) {
+          uiModule.showToast(`Pick a ${lane} model to hop`);
+        }
+      }, 150);
     }
   });
 
