@@ -61,6 +61,31 @@
   /* Warm accent — used by the Goals/Today UI in Notes. Lives as a token so
      themes can override without touching the goal CSS. */
   --accent-warm: #d19a66;
+
+  /* Terminal panel palette. Kept dark in *both* light and dark Odysseus
+     themes — same convention as VS Code, iTerm, Hyper. ANSI color schemes
+     are tuned for dark backgrounds and the terminal reads as an "embedded
+     device" inside the app, so flipping it to white on light theme would
+     hurt legibility more than it would help cohesion. Themes can still
+     override these tokens for fully custom looks (see :root.light). */
+  --terminal-chrome-bg: var(--panel);      /* toolbar — matches sidebar chrome */
+  --terminal-chrome-fg: var(--fg);          /* toolbar text */
+  /* Terminal palette: Ayu One Dark Pro | Dark — matched 1:1 to Matthew's VS Code
+     theme (smeagolem.ayu-one-dark-pro, ayu-one-dark-pro-dark variant) so the
+     embedded terminal reads exactly like his editor. _readTerminalTheme() in
+     terminal.js reads all of these (bg/fg/cursor/selection + the 16 ANSI). */
+  --terminal-bg: #0a0e14;                   /* xterm canvas background (editor.background) */
+  --terminal-fg: #b3b1ad;                   /* xterm canvas foreground */
+  --terminal-cursor: #e6b450;               /* Ayu accent gold (theme leaves terminalCursor unset) */
+  --terminal-selection-bg: #161f2a;
+  --term-ansi-black: #01060e;   --term-ansi-bright-black: #686868;
+  --term-ansi-red: #ea6c73;     --term-ansi-bright-red: #f07178;
+  --term-ansi-green: #91b362;   --term-ansi-bright-green: #c2d94c;
+  --term-ansi-yellow: #f9af4f;  --term-ansi-bright-yellow: #ffb454;
+  --term-ansi-blue: #53bdfa;    --term-ansi-bright-blue: #59c2ff;
+  --term-ansi-magenta: #fae994; --term-ansi-bright-magenta: #ffee99;
+  --term-ansi-cyan: #90e1c6;    --term-ansi-bright-cyan: #95e6cb;
+  --term-ansi-white: #c7c7c7;   --term-ansi-bright-white: #ffffff;
 }
 
 :root.light {
@@ -78,6 +103,17 @@
   --hl-builtin: #0070a0;
   --hl-variable: #383a42;
   --hl-params: #4a4f5c;
+  /* Light-mode terminal: chrome stays dark so the embedded terminal reads
+     as its own panel rather than a stark white-on-black gap. Same idea as
+     VS Code's bottom panel staying dark when the editor is light. */
+  --terminal-chrome-bg: #1a1d22;
+  --terminal-chrome-fg: #e6e6e6;
+  /* Keep the Ayu terminal palette even in light mode — the embedded terminal
+     stays dark (matches Matthew's editor); ANSI vars inherit from :root. */
+  --terminal-bg: #0a0e14;
+  --terminal-fg: #b3b1ad;
+  --terminal-cursor: #e6b450;
+  --terminal-selection-bg: #161f2a;
 }
 
 /* ── Reset & Base ── */
@@ -2457,6 +2493,58 @@ body.bg-pattern-sparkles {
       text-decoration: none;
     }
     .gh-intg-hint a:hover { text-decoration: underline; }
+
+    /* Same accent-link treatment for cross-tab pointers that live in
+       .admin-toggle-sub (the GitHub-tab's "Connection settings live in
+       Integrations →" link). Without this they fall back to the browser
+       default #0000EE blue, which is unreadable on the dark theme. */
+    .admin-toggle-sub a {
+      color: var(--accent, var(--red));
+      text-decoration: none;
+    }
+    .admin-toggle-sub a:hover { text-decoration: underline; }
+
+    /* Compact "connected" block inside the Integrations GitHub card. */
+    .gh-intg-connected { margin-top: 4px; }
+
+    /* Master enable/disable row — single source of truth for "is the
+       GitHub integration currently active?". Flipping this OFF leaves the
+       PAT stored but pauses the integration: chat-input toggle hides,
+       briefing stops being injected, terminal env vars stop being set. */
+    .gh-intg-master-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 0;
+      cursor: pointer;
+      user-select: none;
+    }
+    .gh-intg-master-label {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+      font-size: 13px;
+    }
+    .gh-intg-master-user {
+      font-weight: 600;
+    }
+    .gh-intg-master-state {
+      font-size: 11px;
+      opacity: 0.55;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    /* When the toggle is OFF, dim the whole row so the visual state
+       matches the semantic state without changing layout. */
+    .gh-intg-master-row.is-paused .gh-intg-master-user,
+    .gh-intg-master-row.is-paused .gh-intg-master-label {
+      opacity: 0.55;
+    }
+
+    /* Manage-token <details> takes the same look as the FAQ but with a
+       little more breathing room since it's an actionable section. */
+    .gh-intg-rotate { margin-top: 10px; }
+    .gh-intg-rotate[open] summary { opacity: 1; }
     .gh-intg-msg {
       font-size: 11px;
       min-height: 14px;
@@ -7597,7 +7685,11 @@ button.hamburger {
   position: fixed;
   top: 0; right: 0; bottom: 0;
   left: var(--sidebar-width, 240px);
-  background: var(--bg, #0a0a0a);
+  /* Match the terminal canvas itself so the chrome strip flows into the
+     terminal area instead of revealing a different page-bg color in the
+     gap. Was var(--bg) which painted the user's grey page bg behind a
+     hard-coded #000 terminal — two different colors stacked. */
+  background: var(--terminal-bg, #0d0d0d);
   display: flex;
   flex-direction: column;
   z-index: 50;
@@ -7605,15 +7697,112 @@ button.hamburger {
 #terminal-panel.hidden { display: none; }
 .sidebar.hidden ~ #terminal-panel,
 body.sidebar-collapsed #terminal-panel { left: 0; }
-.terminal-toolbar {
+
+/* Auto-fullscreen the terminal panel when it's open. The sidebar eats
+   ~240px which forces TUI apps (claude, codex, etc.) into compact /
+   truncated render modes. Hiding the sidebar while the terminal is
+   active gives the panel ~Windows-Terminal-width to work with. The
+   class is added in openTerminal() and removed in closeTerminal() so
+   the sidebar never gets stuck hidden — leaving the terminal always
+   restores it. */
+/* Terminal mode hides the sidebar for width, but the user must still be able
+   to bring it back. Hide it via the SAME .hidden mechanism the hamburger/rail
+   toggle drives (openTerminal adds .hidden) — NOT an unconditional display:none,
+   which left nothing to click. When the user clicks the hamburger the sidebar
+   gets .hidden removed and overlays on top of the terminal panel (z-index 50). */
+body.terminal-fullscreen .sidebar.hidden { display: none; }
+body.terminal-fullscreen .sidebar:not(.hidden) {
+  position: fixed;
+  top: 0; bottom: 0; left: 0;
+  z-index: 60;
+  box-shadow: 0 0 28px rgba(0, 0, 0, 0.55);
+}
+/* Keep a clickable affordance floating above the terminal to re-open it. */
+body.terminal-fullscreen .hamburger-btn { display: flex; z-index: 61; }
+body.terminal-fullscreen #terminal-panel { left: 0; }
+
+/* Panel-level bar: layout picker + close. Per-pane controls live INSIDE
+   each pane (cloned from the toolbar template). */
+.terminal-panel-bar {
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 6px 12px;
-  background: transparent;
-  border-bottom: 1px solid var(--border, #222);
+  background: var(--terminal-chrome-bg, var(--panel, #111));
+  color: var(--terminal-chrome-fg, var(--fg, #e6e6e6));
+  border-bottom: 1px solid color-mix(in srgb, var(--terminal-chrome-fg, var(--fg, #fff)) 12%, transparent);
   flex-shrink: 0;
   font-size: 12px;
+}
+
+/* Per-pane toolbar (cloned from #terminal-pane-toolbar-tpl). Same chrome
+   as the panel bar but slightly more compact since multiple panes mean
+   multiple toolbars stack visually. */
+.terminal-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  background: var(--terminal-chrome-bg, var(--panel, #111));
+  color: var(--terminal-chrome-fg, var(--fg, #e6e6e6));
+  border-bottom: 1px solid color-mix(in srgb, var(--terminal-chrome-fg, var(--fg, #fff)) 12%, transparent);
+  flex-shrink: 0;
+  font-size: 12px;
+}
+
+/* Grid that holds the panes. The layout class (set on #terminal-panel
+   data-layout) chooses the grid template. */
+.terminal-grid {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  gap: 1px;  /* thin divider line between panes, painted by the panel bg */
+  background: color-mix(in srgb, var(--terminal-chrome-fg, var(--fg, #fff)) 18%, transparent);
+}
+#terminal-panel[data-layout="1"]  .terminal-grid { grid-template: 1fr / 1fr; }
+#terminal-panel[data-layout="2h"] .terminal-grid { grid-template: 1fr / 1fr 1fr; }
+#terminal-panel[data-layout="2v"] .terminal-grid { grid-template: 1fr 1fr / 1fr; }
+#terminal-panel[data-layout="4"]  .terminal-grid { grid-template: 1fr 1fr / 1fr 1fr; }
+
+/* One pane = its own toolbar stacked on its own xterm container. */
+.terminal-pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  background: var(--terminal-bg, #0d0d0d);
+  overflow: hidden;
+  position: relative;
+}
+.terminal-pane-container {
+  flex: 1;
+  min-height: 0;
+  padding: 4px 6px 0;
+  background: var(--terminal-bg, #0d0d0d);
+  overflow: hidden;
+}
+
+/* Active pane gets a subtle accent border on the inner side so the user
+   can see at a glance where keyboard input is going. Soft enough that
+   it's not visually loud when only one pane is up. */
+.terminal-pane.is-active {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent, var(--red)) 50%, transparent);
+}
+/* Letter chip in each pane's toolbar (A/B/C/D) — small, theme-accent
+   color, helps users identify "the right pane" when referring to logs. */
+.terminal-pane-letter {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--accent, var(--red)) 18%, transparent);
+  color: var(--accent, var(--red));
+  font-weight: 600;
+  font-size: 11px;
+  letter-spacing: 0.5px;
 }
 .terminal-title {
   display: inline-flex;
@@ -7625,33 +7814,75 @@ body.sidebar-collapsed #terminal-panel { left: 0; }
 .terminal-meta {
   font-family: ui-monospace, monospace;
   font-size: 11px;
-  opacity: 0.45;
+  opacity: 0.55;
 }
-/* GitHub-auth indicator in the terminal toolbar. Lit pill with the user's
-   GitHub handle when integration is configured + enabled — gh CLI just
-   works inside this terminal. Clicking opens Settings → GitHub. */
+/* GitHub per-pty toggle group in the terminal toolbar. The lit pill on
+   the left toggles GitHub auth in THIS shell (writes export/unset into
+   the pty stdin); the small gear on the right opens GitHub settings.
+   Visible only when the master integration is configured + enabled —
+   when paused/missing, the whole group hides.
+
+   States:
+     .is-on   — auth env IS set in the pty (filled accent style)
+     .is-off  — auth env was unset in the pty (outlined / dim style) */
+.terminal-gh-toggle-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
 .terminal-gh-indicator {
   display: inline-flex;
   align-items: center;
   gap: 4px;
   padding: 3px 8px;
-  border-radius: 4px;
+  border-radius: 4px 0 0 4px;  /* squared off where it meets the gear */
   font-size: 11px;
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s, border-color 0.1s, opacity 0.1s;
+}
+.terminal-gh-indicator.is-on {
   background: color-mix(in srgb, var(--accent, var(--red)) 14%, transparent);
   color: var(--accent, var(--red));
   border: 1px solid color-mix(in srgb, var(--accent, var(--red)) 35%, transparent);
-  cursor: pointer;
-  transition: background 0.1s;
 }
-.terminal-gh-indicator:hover {
-  background: color-mix(in srgb, var(--accent, var(--red)) 20%, transparent);
+.terminal-gh-indicator.is-on:hover {
+  background: color-mix(in srgb, var(--accent, var(--red)) 22%, transparent);
+}
+.terminal-gh-indicator.is-off {
+  background: transparent;
+  color: color-mix(in srgb, var(--terminal-chrome-fg, var(--fg, #fff)) 40%, transparent);
+  border: 1px solid color-mix(in srgb, var(--terminal-chrome-fg, var(--fg, #fff)) 18%, transparent);
+}
+.terminal-gh-indicator.is-off:hover {
+  color: color-mix(in srgb, var(--terminal-chrome-fg, var(--fg, #fff)) 65%, transparent);
+  border-color: color-mix(in srgb, var(--terminal-chrome-fg, var(--fg, #fff)) 32%, transparent);
+}
+.terminal-gh-settings-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px 6px;
+  border-radius: 0 4px 4px 0;  /* squared off where it meets the pill */
+  background: transparent;
+  color: color-mix(in srgb, var(--terminal-chrome-fg, var(--fg, #fff)) 45%, transparent);
+  border: 1px solid color-mix(in srgb, var(--terminal-chrome-fg, var(--fg, #fff)) 18%, transparent);
+  border-left: none;  /* avoid double-thickness border between the two */
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s, border-color 0.1s;
+}
+.terminal-gh-settings-btn:hover {
+  background: color-mix(in srgb, var(--terminal-chrome-fg, var(--fg, #fff)) 8%, transparent);
+  color: color-mix(in srgb, var(--terminal-chrome-fg, var(--fg, #fff)) 80%, transparent);
 }
 .terminal-spacer { flex: 1; }
 .terminal-picker,
 .terminal-btn {
   background: transparent;
   color: inherit;
-  border: 1px solid var(--border, #2a2a2a);
+  /* Border anchored to chrome-fg so it scales with the toolbar's own text
+     color (which is always near-white per the terminal token), not the
+     page --border which can be very saturated in colored themes. */
+  border: 1px solid color-mix(in srgb, var(--terminal-chrome-fg, var(--fg, #fff)) 18%, transparent);
   border-radius: 4px;
   padding: 3px 8px;
   font-size: 11px;
@@ -7660,8 +7891,8 @@ body.sidebar-collapsed #terminal-panel { left: 0; }
 }
 .terminal-picker:hover,
 .terminal-btn:hover {
-  background: color-mix(in srgb, var(--fg, #fff) 6%, transparent);
-  border-color: color-mix(in srgb, var(--fg, #fff) 25%, transparent);
+  background: color-mix(in srgb, var(--terminal-chrome-fg, var(--fg, #fff)) 8%, transparent);
+  border-color: color-mix(in srgb, var(--terminal-chrome-fg, var(--fg, #fff)) 35%, transparent);
 }
 .terminal-picker { padding-right: 18px; }
 .terminal-btn-danger:hover {
@@ -7682,18 +7913,20 @@ body.sidebar-collapsed #terminal-panel { left: 0; }
   opacity: 1;
   background: color-mix(in srgb, var(--fg, #fff) 8%, transparent);
 }
-#terminal-container {
-  flex: 1;
-  min-height: 0;
-  padding: 4px 6px 0;
-  background: #000;
-  overflow: hidden;
-}
-/* Make xterm fill its container — fitAddon handles the cell math but the
+/* Make xterm fill its pane container — fitAddon handles cell math but the
    .xterm wrapper itself needs height:100% to give it room to measure. */
-#terminal-container .xterm,
-#terminal-container .xterm-viewport,
-#terminal-container .xterm-screen { height: 100% !important; }
+.terminal-pane-container .xterm,
+.terminal-pane-container .xterm-viewport,
+.terminal-pane-container .xterm-screen { height: 100% !important; }
+
+/* xterm.js's default xterm.css uses `overflow-y: scroll` on the viewport
+   — which reserves the scrollbar width permanently, even when there's
+   nothing to scroll. That eats ~15px on the right and clips right-aligned
+   TUI content (timestamps in claude's status panel, right-justified columns,
+   etc.). Switch to `auto` so the scrollbar only appears when content
+   actually overflows; the rest of the time the full column count claude
+   asks for is visible. */
+.terminal-pane-container .xterm-viewport { overflow-y: auto !important; }
 
 /* ============================================ */
 /* HEADER SIZING FOR CHAT MESSAGES */
