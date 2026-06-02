@@ -949,6 +949,24 @@
           </svg>
           <span class="grow">Notes</span>
         </div>
+        <div class="section" id="todo-section">
+          <div class="section-header-flex">
+            <span class="section-title" id="todo-section-title">
+              <svg class="section-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+              <span class="section-title-label">To-Do</span>
+              <span id="todo-count" class="sidebar-notif-dot" style="font-size:9px;min-width:14px;text-align:center;display:none;"></span>
+            </span>
+          </div>
+          <div id="todo-body">
+            <div class="todo-add-row">
+              <input type="text" id="todo-input" class="todo-input" placeholder="Add item..." autocomplete="off">
+              <button type="button" id="todo-add-btn" class="todo-add-btn" title="Add">+</button>
+            </div>
+            <div id="todo-list"></div>
+            <div id="todo-empty" class="todo-empty">No items yet</div>
+          </div>
+        </div>
+
         <div class="list-item" id="tool-tasks-btn">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
             stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
