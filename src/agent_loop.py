@@ -544,6 +544,7 @@ def _build_system_prompt(
     mcp_disabled_map: Optional[Dict[str, set]] = None,
     compact: bool = False,
     owner: Optional[str] = None,
+    github_briefing: Optional[str] = None,
 ) -> List[Dict]:
     """Build agent system prompt, inject MCP/document context, merge consecutive system msgs."""
     global _cached_base_prompt, _cached_base_prompt_key
@@ -906,6 +907,31 @@ def _build_system_prompt(
                 break
         merged.insert(last_user_idx, _doc_message)
 
+    # Late-inject the GitHub briefing close to the model's decision point.
+    # The briefing is ALSO injected early (via extra_system_prompts in the
+    # context preface), but in long conversations that early copy gets buried
+    # thousands of tokens back — models weight recent instructions more heavily,
+    # so their own baked-in conventions override the briefing by position.
+    # Re-injecting it as a protected system message right before the last user
+    # message ensures the mechanical rules (commit trailers, PR format, force-
+    # push policy) are fresh in context at the moment of action. Same pattern
+    # as the document injection above, same reason.
+    if github_briefing:
+        _brief_msg = {
+            "role": "system",
+            "content": (
+                "[GitHub working standards — applies to ALL write actions this turn]\n\n"
+                + github_briefing
+            ),
+            "_protected": True,
+        }
+        last_user_idx = len(merged) - 1
+        for i in range(len(merged) - 1, -1, -1):
+            if merged[i].get("role") == "user":
+                last_user_idx = i
+                break
+        merged.insert(last_user_idx, _brief_msg)
+
     return merged, mcp_schemas
 
 
@@ -1240,6 +1266,7 @@ async def stream_agent_loop(
     relevant_tools: Optional[Set[str]] = None,
     fallbacks: Optional[List[tuple]] = None,
     _is_teacher_run: bool = False,
+    github_briefing: Optional[str] = None,
 ) -> AsyncGenerator[str, None]:
     """Streaming agent loop generator.
 
@@ -1379,6 +1406,7 @@ async def stream_agent_loop(
         mcp_disabled_map=_mcp_disabled_map,
         compact=_is_api_model,
         owner=owner,
+        github_briefing=github_briefing,
     )
     prep_timings["prompt_build"] = time.time() - _t2
 

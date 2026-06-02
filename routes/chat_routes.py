@@ -119,6 +119,25 @@ def _fetch_github_briefing(owner: str | None) -> str | None:
         return None
 
 
+def _github_is_active(owner: str | None) -> bool:
+    """True iff the user has GitHub configured AND the integration is
+    enabled (master toggle ON in Settings → Integrations). Used as a
+    defense-in-depth gate alongside the per-turn `allow_github` form
+    flag — a stale tab can have allow_github=true in its DOM after the
+    user paused the integration elsewhere, and we don't want those
+    requests to still be able to invoke gh_* tools."""
+    try:
+        from core.database import SessionLocal as _SL, GitHubIntegration as _GI
+    except Exception:
+        return False
+    try:
+        with _SL() as db:
+            row = db.query(_GI).filter_by(owner=owner or "").first()
+        return bool(row and row.enabled and row.pat_encrypted)
+    except Exception:
+        return False
+
+
 def _fetch_github_notif_hint(owner: str | None) -> str | None:
     """If notify_enabled AND there are unread GitHub notifications cached,
     return a one-liner the agent should know about so it can surface the
@@ -144,8 +163,11 @@ def _fetch_github_notif_hint(owner: str | None) -> str | None:
         return (
             f"FYI for the agent (do not volunteer for every reply, only if "
             f"relevant or at a natural pause): the user has {count} unread "
-            f"GitHub notification{plural}. They can call gh_get_notifications "
-            f"to see details if asked."
+            f"GitHub notification{plural}. If the user mentions PRs, issues, "
+            f"reviews, or notifications — OR if you're about to summarize their "
+            f"GitHub state — call gh_get_notifications first to surface what's "
+            f"actually there, don't just parrot the count. For unrelated chat, "
+            f"this is silent context; don't bring it up unprompted every turn."
         )
     except Exception:
         return None
@@ -303,6 +325,14 @@ def setup_chat_routes(
         # below). Skill extraction should only learn from real agent sessions,
         # not chats we quietly promoted for a notes/calendar intent.
         user_requested_agent = (chat_mode == "agent")
+        # FORK: this fork has no chat/agent split — the agent harness runs on
+        # EVERY turn with the full tool set, like Claude. The model self-selects
+        # tools (and just answers when none are needed) instead of relying on a
+        # toggle the user has to remember. Forcing it here (before the auto-
+        # escalation check below) means it's treated as a full agent session,
+        # not the "light promotion" that withholds shell/file tools. Per-tool
+        # availability is still governed by the individual tool toggles/settings.
+        chat_mode = "agent"
         # Intent auto-escalation: if the user is clearly asking the assistant
         # to create a todo, reminder, or calendar event, promote chat → agent
         # for this turn so the LLM has access to manage_notes / manage_calendar.
@@ -380,11 +410,13 @@ def setup_chat_routes(
         # Only loaded when allow_github is set so chats without GitHub
         # in play don't pay the token cost.
         _extra_prompts: list[str] = []
+        _gh_briefing_text: str | None = None    # saved for late re-injection
         if str(allow_github).lower() == "true":
             _owner_for_gh = getattr(sess, "owner", None) or ""
             _brief = _fetch_github_briefing(_owner_for_gh)
             if _brief:
                 _extra_prompts.append(_brief)
+                _gh_briefing_text = _brief
             # Notification hint — opt-in via notify_enabled. Surfaces the
             # cached unread count so the agent can mention it at a natural
             # pause. Won't fire if the user hasn't enabled notifications.
@@ -483,7 +515,12 @@ def setup_chat_routes(
             "gh_open_pr", "gh_edit_pr", "gh_close_issue",
             "gh_push_commits", "gh_mark_notification_read",
         }
-        if str(allow_github).lower() != "true":
+        # Defense-in-depth: even if the form says allow_github=true, fall
+        # through to denying the tools when the server-side integration is
+        # paused/missing. Prevents a stale tab from invoking gh_* tools
+        # after the user paused the integration in another tab.
+        _gh_active = _github_is_active(getattr(sess, "owner", None) or "")
+        if str(allow_github).lower() != "true" or not _gh_active:
             disabled_tools.update(_gh_read_tools | _gh_write_tools)
         elif str(allow_github_write).lower() != "true":
             disabled_tools.update(_gh_write_tools)
@@ -897,6 +934,7 @@ def setup_chat_routes(
                         disabled_tools=disabled_tools if disabled_tools else None,
                         owner=_user,
                         fallbacks=_fallback_candidates,
+                        github_briefing=_gh_briefing_text,
                     ):
                         if chunk.startswith("data: ") and not chunk.startswith("data: [DONE]"):
                             try:

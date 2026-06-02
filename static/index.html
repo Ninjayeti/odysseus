@@ -196,6 +196,7 @@
   <script defer src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/@xterm/addon-canvas@0.7.0/lib/addon-canvas.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/@xterm/addon-unicode11@0.8.0/lib/addon-unicode11.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/@xterm/addon-webgl@0.18.0/lib/addon-webgl.min.js"></script>
   <!-- Inter font — self-hosted, no Google dependencies -->
   <style>
     @font-face { font-family: 'Inter'; font-weight: 400; font-style: normal; font-display: swap; src: url('/static/fonts/Inter-Regular.woff2') format('woff2'); }
@@ -219,7 +220,7 @@
       }, { once: true });
     })();
   </script>
-  <link rel="stylesheet" href="/static/style.css?v=346">
+  <link rel="stylesheet" href="/static/style.css?v=354">
   <link rel="modulepreload" href="/static/app.js">
   <link rel="modulepreload" href="/static/js/chat.js">
   <link rel="modulepreload" href="/static/js/ui.js">
@@ -251,31 +252,57 @@
        content (everything except the sidebar). No backdrop, no card, no
        drag — feels like switching to a panel. Styles in style.css under
        /* ── Terminal panel ── */. -->
-  <div id="terminal-panel" class="hidden">
-    <div class="terminal-toolbar">
+  <div id="terminal-panel" class="hidden" data-layout="1">
+    <!-- Panel-level chrome: layout picker on the left, close button on
+         the right. Layout choices: 1 (single), 2h (side-by-side),
+         2v (stacked), 4 (2x2). Per-pane controls (session info, shell
+         picker, GitHub toggle, +New/Kill) live INSIDE each pane in
+         a per-pane toolbar that JS generates from #terminal-pane-toolbar-tpl. -->
+    <div class="terminal-panel-bar">
       <span class="terminal-title">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
         Terminal
       </span>
-      <span id="terminal-session-info" class="terminal-meta"></span>
-      <!-- GitHub indicator: lit when the user has GitHub integration enabled.
-           Confirms that gh CLI / git push will authenticate as their account
-           inside this terminal (GH_TOKEN + GITHUB_TOKEN env are auto-injected
-           in routes/terminal_routes.py:spawn). Hidden when no integration.
-           Click → opens Settings → GitHub tab. -->
-      <button type="button" id="terminal-gh-indicator" class="terminal-gh-indicator" title="GitHub auth is live in this terminal" style="display:none">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>
-        <span id="terminal-gh-indicator-name"></span>
-      </button>
-      <span class="terminal-spacer"></span>
-      <select id="terminal-shell-picker" class="terminal-picker" title="Shell for new sessions">
-        <option value="">…</option>
+      <select id="terminal-layout-picker" class="terminal-picker" title="Pane layout">
+        <option value="1">▢ Single</option>
+        <option value="2h">▥ Side-by-side</option>
+        <option value="2v">▤ Stacked</option>
+        <option value="4">▦ 2×2</option>
       </select>
-      <button id="terminal-new-btn" class="terminal-btn" title="New terminal session with selected shell">+ New</button>
-      <button id="terminal-kill-btn" class="terminal-btn terminal-btn-danger" title="Kill this terminal session">Kill</button>
+      <span class="terminal-spacer"></span>
       <button id="close-terminal-panel" class="terminal-btn-x" aria-label="Close terminal panel" title="Close (Esc)">✕</button>
     </div>
-    <div id="terminal-container"></div>
+    <!-- Grid that holds 1-4 panes. data-layout on #terminal-panel drives
+         the CSS grid template (see style.css .terminal-grid rules). -->
+    <div id="terminal-grid" class="terminal-grid">
+      <!-- Panes injected by JS. -->
+    </div>
+
+    <!-- Template for a per-pane toolbar. Cloned + populated by JS once
+         per pane. The .terminal-pane-N indicator + data-pane attribute
+         let CSS style the active pane border + GitHub group hooks pick
+         the right pane on click. -->
+    <template id="terminal-pane-toolbar-tpl">
+      <div class="terminal-toolbar terminal-pane-toolbar">
+        <span class="terminal-title terminal-pane-letter">A</span>
+        <span class="terminal-meta terminal-pane-session-info"></span>
+        <div class="terminal-gh-toggle-group terminal-pane-gh-group" style="display:none">
+          <button type="button" class="terminal-gh-indicator terminal-pane-gh-indicator is-on" title="GitHub auth is live in this terminal (click to disable for this session)">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>
+            <span class="terminal-pane-gh-name"></span>
+          </button>
+          <button type="button" class="terminal-gh-settings-btn terminal-pane-gh-settings" title="Open GitHub settings" aria-label="GitHub settings">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          </button>
+        </div>
+        <span class="terminal-spacer"></span>
+        <select class="terminal-picker terminal-pane-shell-picker" title="Shell for new sessions">
+          <option value="">…</option>
+        </select>
+        <button type="button" class="terminal-btn terminal-pane-new-btn" title="New terminal session in this pane">+ New</button>
+        <button type="button" class="terminal-btn terminal-btn-danger terminal-pane-kill-btn" title="Kill this pane's session">Kill</button>
+      </div>
+    </template>
   </div>
 
   <!-- Memory Management Modal -->
@@ -1144,8 +1171,12 @@
           </button>
         </div>
         <div class="chat-input-right">
-          <!-- Agent / Chat mode toggle -->
-          <div class="mode-toggle">
+          <!-- Agent / Chat mode toggle — HIDDEN in this fork. The server runs
+               the agent harness on every turn (chat_routes forces agent mode),
+               so the chat/agent split no longer exists. The buttons stay in the
+               DOM (mode-agent-btn keeps `active`) so the JS that reads mode and
+               shows the tool buttons keeps working; they're just not shown. -->
+          <div class="mode-toggle" style="display:none">
             <button type="button" class="mode-toggle-btn active" id="mode-agent-btn">Agent</button>
             <button type="button" class="mode-toggle-btn" id="mode-chat-btn">Chat</button>
           </div>
@@ -2117,6 +2148,7 @@
                   <option value="https://generativelanguage.googleapis.com/v1beta/openai" data-logo="gemini">Google Gemini</option>
                   <option value="https://api.x.ai/v1" data-logo="grok">xAI Grok</option>
                   <option value="https://api.z.ai/api/paas/v4" data-logo="zhipu">Z.AI (Zhipu)</option>
+                  <option value="https://api.moonshot.ai/v1" data-logo="moonshot">Moonshot (Kimi)</option>
                 </select>
                 <div class="admin-model-form-row">
                   <input id="adm-epApiKey" type="password" placeholder="API key">
@@ -2174,17 +2206,27 @@
                 <path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/>
               </svg>
               GitHub
+              <!-- Header status is only used in the not-connected ("Not
+                   connected") and paused ("Paused") cases. When the toggle
+                   is on, the username is shown in the toggle row below —
+                   no need to also stamp it here. -->
               <span id="gh-intg-status" style="font-size:11px;font-weight:400;opacity:0.55;margin-left:8px"></span>
             </h2>
-            <div class="admin-toggle-sub" style="margin-bottom:10px">
-              Lets the agent read your PRs, search issues, and review diffs when you toggle the GitHub icon on in the chat input.
-            </div>
+            <!-- Description only shown to first-time / not-connected users
+                 (lives inside gh-intg-setup below). Once connected, the
+                 toggle row is self-explanatory and the description is just
+                 visual noise. -->
 
-            <!-- Guided setup: explains what a PAT is and gives a one-click
+            <!-- ── SETUP VIEW ──
+                 Guided setup: explains what a PAT is and gives a one-click
                  link that opens GitHub's token-creation page with the right
                  permissions pre-selected. Two-step UX for users who've
-                 never made a PAT: click Generate, then paste. -->
+                 never made a PAT. Hidden once connected (see _render in
+                 settings.js) — replaced by the compact connected view below. -->
             <div class="gh-intg-setup" id="gh-intg-setup">
+              <div class="admin-toggle-sub" style="margin-bottom:10px">
+                Lets the agent read your PRs, search issues, and review diffs when you toggle the GitHub icon on in the chat input.
+              </div>
               <ol class="gh-intg-steps">
                 <li>
                   <span class="gh-intg-step-num">1</span>
@@ -2215,21 +2257,53 @@
               </details>
             </div>
 
-            <!-- Once connected, the rest of the controls live on the
-                 GitHub tab. Surface a pointer here so users know where. -->
-            <div class="gh-intg-section" id="gh-intg-connected-pointer" style="display:none">
-              <div class="gh-intg-hint" style="margin-top:8px">
+            <!-- ── CONNECTED VIEW ──
+                 Shown only when info.configured. The whole "are you using
+                 GitHub right now?" answer is a single toggle row — flipping
+                 it OFF pauses the integration without wiping the PAT
+                 (server-side `enabled` flag). Below that: pointer to the
+                 GitHub tab for per-integration knobs, a collapsible
+                 "Manage token" dropdown for rotating the PAT, and the
+                 destructive Disconnect button. -->
+            <div class="gh-intg-connected" id="gh-intg-connected-block" style="display:none">
+              <label class="gh-intg-master-row" id="gh-intg-master-row">
+                <input type="checkbox" class="gh-toggle-switch" id="gh-intg-enabled">
+                <span class="gh-intg-master-label">
+                  <span class="gh-intg-master-user" id="gh-intg-connected-username">@…</span>
+                  <span class="gh-intg-master-state" id="gh-intg-master-state-text">connected</span>
+                </span>
+              </label>
+              <div class="gh-intg-hint" style="margin-top:6px">
                 Briefing, write permissions, and notification preferences are on the <a href="#" id="gh-intg-go-to-tab">GitHub tab →</a>
+              </div>
+
+              <details class="gh-intg-faq gh-intg-rotate" id="gh-intg-rotate">
+                <summary>Manage token</summary>
+                <div class="gh-intg-step-desc" style="margin-top:6px">
+                  Rotate to a fresh PAT (the old one stops working once GitHub revokes it; until then both work).
+                </div>
+                <a class="gh-intg-cta" id="gh-intg-generate-link-rotate" href="#" target="_blank" rel="noopener" style="margin:8px 0">
+                  Generate a new token →
+                </a>
+                <div class="gh-intg-pat-row">
+                  <input type="password" id="gh-intg-pat-rotate" placeholder="github_pat_..." autocomplete="off">
+                  <button type="button" class="admin-btn-sm" id="gh-intg-save-rotate">Replace</button>
+                </div>
+                <div class="gh-intg-msg" id="gh-intg-pat-rotate-msg"></div>
+              </details>
+
+              <div class="gh-intg-section">
+                <button type="button" class="admin-btn-sm" id="gh-intg-disconnect" style="color:var(--red,#ff4d4f);border-color:var(--red,#ff4d4f);">
+                  Disconnect GitHub
+                </button>
+                <span class="gh-intg-hint" style="margin-left:8px">Removes the PAT. Briefing is preserved.</span>
               </div>
             </div>
 
-            <!-- Disconnect — wipes the PAT, briefing stays for next time. -->
-            <div class="gh-intg-section" id="gh-intg-disconnect-section" style="display:none">
-              <button type="button" class="admin-btn-sm" id="gh-intg-disconnect" style="color:var(--red,#ff4d4f);border-color:var(--red,#ff4d4f);">
-                Disconnect GitHub
-              </button>
-              <span class="gh-intg-hint" style="margin-left:8px">Removes the PAT. Briefing is preserved.</span>
-            </div>
+            <!-- Legacy node kept (hidden) so old settings.js references during
+                 hot-reload don't throw. Safe to remove after a few releases. -->
+            <div id="gh-intg-connected-pointer" style="display:none"></div>
+            <div id="gh-intg-disconnect-section" style="display:none"></div>
           </div>
         </div>
 
@@ -2275,6 +2349,18 @@
                 </span>
                 <input type="checkbox" class="gh-toggle-switch" id="gh-intg-notify">
               </label>
+              <!-- Prerequisite hint. GitHub's "Participating, @mentions and custom"
+                   defaults to "Email" only — meaning PR merges, issue mentions,
+                   and review activity NEVER hit the web notifications feed (which
+                   is what /notifications returns). Without flipping this to "on
+                   GitHub, Email" the API correctly returns 0 and the badge never
+                   lights up. This bites everyone on first use; surface it inline. -->
+              <div class="gh-intg-hint" style="margin-top:8px">
+                Heads up: GitHub's <a href="https://github.com/settings/notifications" target="_blank" rel="noopener">notification settings</a>
+                default "Participating, @mentions and custom" to <strong>Email only</strong>. Flip both that
+                and "Watching" to <strong>on GitHub, Email</strong> — otherwise events never reach the feed we poll
+                and the badge will stay at 0 even when PRs merge or issues mention you.
+              </div>
             </div>
 
             <!-- Briefing — the system-prompt addendum the agent gets when GitHub is on. -->
