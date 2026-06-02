@@ -66,11 +66,16 @@ function _setButtonVisibility(visible) {
 async function _refresh() {
   const info = await _fetchIntegration();
   _configured = !!(info && info.configured);
+  // Treat a paused integration (enabled=false) the same as not-configured
+  // for chat purposes — the button hides, the toggle clears. The PAT is
+  // still stored server-side; user just flipped the master switch off in
+  // Settings → Integrations. Re-enabling re-shows the button on next refresh.
+  const _active = _configured && info && info.enabled !== false;
   _writeEnabled = !!(info && info.write_enabled);
   _notifyEnabled = !!(info && info.notify_enabled);
-  _setButtonVisibility(_configured);
-  // If integration was deleted while toggle was on, force it off.
-  if (!_configured) _setEnabled(false);
+  _setButtonVisibility(_active);
+  // If integration was deleted OR paused while toggle was on, force it off.
+  if (!_active) _setEnabled(false);
   // Re-mirror the write_enabled state into the hidden checkbox so chat.js
   // picks it up on the next submit without waiting for a click.
   _setEnabled($('gh-toggle')?.checked || false);
@@ -85,7 +90,12 @@ async function _refresh() {
 // notify_enabled — turning either off stops it immediately.
 
 async function _pollUnread() {
+  // The notif poller piggybacks on the same active=configured+enabled
+  // gate. If the integration is paused, we stop hitting GitHub entirely.
   if (!_configured || !_notifyEnabled) return;
+  // (Note: _refresh already toggles button visibility on pause; the poll
+  // gate here is a second line so a long-running interval doesn't keep
+  // polling between refreshes.)
   try {
     const r = await fetch('/api/github/notifications/count', { credentials: 'same-origin' });
     if (!r.ok) return;

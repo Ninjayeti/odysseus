@@ -1,11 +1,11 @@
 """
 github_server.py
 
-MCP server exposing GitHub tools (read-only for now): list your PRs,
-fetch PR details and diffs, list comments, search issues, read your
-notification feed. Authenticated with a per-user Personal Access Token
-stored encrypted in `github_integrations.pat_encrypted` and decrypted
-at request time.
+MCP server exposing GitHub tools — both read (list PRs, fetch diffs,
+search issues, notifications) and write (post comments, open/edit PRs,
+close issues, mark notifications, push commits). Authenticated with a
+per-user Personal Access Token stored encrypted in
+`github_integrations.pat_encrypted` and decrypted at request time.
 
 Routing: a request comes in with no per-user context (MCP is process-
 wide). We resolve which user's PAT to use via the `ODYSSEUS_GH_OWNER`
@@ -14,13 +14,23 @@ we run one MCP instance per app process, scoped to whichever owner
 the integration row belongs to. Multi-tenant servers can later switch
 this to per-call routing.
 
-Write tools (post_comment, open_pr, push) are not implemented yet — the
-write_enabled flag in the DB is plumbed but unused until v2.
+Write-tool gating happens upstream in routes/chat_routes.py: the entire
+gh_*write* family is added to disabled_tools unless the user has
+write_enabled=true in Settings → GitHub. This file deliberately doesn't
+re-check that flag — by the time a write tool reaches dispatch, the
+chat layer has already authorized it. (We DO check `enabled` via the
+PAT loader, so a paused integration silently fails write attempts.)
+
+Behavior contracts (transparency before write, no per-action approval)
+live in DEFAULT_BRIEFING in routes/github_routes.py — see the
+WRITE ACTIONS section. The tools themselves are minimal wrappers.
 """
 
 import asyncio
 import json
 import os
+import re
+import subprocess
 import sys
 import sqlite3
 from pathlib import Path
@@ -337,6 +347,161 @@ TOOLS: list[Tool] = [
             "required": [],
         },
     ),
+
+    # ── WRITE TOOLS ──
+    # Gated upstream by `write_enabled` in chat_routes.py:_gh_write_tools.
+    # All write tools should be preceded by a one-or-two-sentence "WHAT and
+    # WHY" in the agent's reply per the default briefing's WRITE ACTIONS
+    # section. The agent should follow up with "WHAT I did + link" after.
+
+    Tool(
+        name="gh_post_pr_comment",
+        description=(
+            "Post a top-level (issue-style) comment on a pull request. NOT for inline review "
+            "comments on specific diff lines — those would need commit_id/path/line and aren't "
+            "exposed yet. Use this for general PR feedback or replies in the main thread."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "owner": {"type": "string", "description": "Repo owner (user or org)."},
+                "repo": {"type": "string", "description": "Repo name."},
+                "number": {"type": "integer", "description": "PR number."},
+                "body": {"type": "string", "description": "Comment body. Supports GitHub-flavored markdown."},
+            },
+            "required": ["owner", "repo", "number", "body"],
+        },
+    ),
+    Tool(
+        name="gh_post_issue_comment",
+        description="Post a comment on an issue. Same endpoint as PR comments under the hood (GitHub treats PRs as issues), but use this name when the target is an actual issue for clarity in chat logs.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "owner": {"type": "string"},
+                "repo": {"type": "string"},
+                "number": {"type": "integer", "description": "Issue number."},
+                "body": {"type": "string"},
+            },
+            "required": ["owner", "repo", "number", "body"],
+        },
+    ),
+    Tool(
+        name="gh_open_pr",
+        description=(
+            "Open a new pull request. Requires the head branch to already exist on the remote "
+            "(use gh_push_commits first if needed). Body is optional — do NOT generate boilerplate "
+            "templates; pass whatever prose the user has signed off on, or omit and edit later via "
+            "gh_edit_pr. The PR's body, title formatting, and structure are 100% the user's call "
+            "via the briefing — don't impose your own conventions."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "owner": {"type": "string", "description": "Repo owner of the BASE repo."},
+                "repo": {"type": "string", "description": "Repo name of the BASE repo."},
+                "title": {"type": "string"},
+                "head": {"type": "string", "description": "Source branch. For a fork, use 'forkowner:branch'."},
+                "base": {"type": "string", "description": "Target branch (e.g. 'main')."},
+                "body": {"type": "string", "description": "Optional PR body. Markdown."},
+                "draft": {"type": "boolean", "default": False, "description": "Open as a draft PR."},
+            },
+            "required": ["owner", "repo", "title", "head", "base"],
+        },
+    ),
+    Tool(
+        name="gh_edit_pr",
+        description=(
+            "Edit an existing pull request — change title, body, base branch, or state. Reversible "
+            "(state can be reopened, body/title can be re-edited). Pass only the fields you want to "
+            "change; omitted fields stay as-is."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "owner": {"type": "string"},
+                "repo": {"type": "string"},
+                "number": {"type": "integer"},
+                "title": {"type": "string"},
+                "body": {"type": "string"},
+                "state": {"type": "string", "enum": ["open", "closed"]},
+                "base": {"type": "string", "description": "Rebase target branch."},
+            },
+            "required": ["owner", "repo", "number"],
+        },
+    ),
+    Tool(
+        name="gh_close_issue",
+        description=(
+            "Close an issue. Reversible (can be reopened). For PRs, use gh_edit_pr with state:closed "
+            "instead — that preserves PR-specific metadata. state_reason 'completed' means resolved; "
+            "'not_planned' means won't-fix / out-of-scope."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "owner": {"type": "string"},
+                "repo": {"type": "string"},
+                "number": {"type": "integer", "description": "Issue number."},
+                "state_reason": {
+                    "type": "string",
+                    "enum": ["completed", "not_planned"],
+                    "default": "completed",
+                },
+            },
+            "required": ["owner", "repo", "number"],
+        },
+    ),
+    Tool(
+        name="gh_mark_notification_read",
+        description=(
+            "Mark a single notification thread as read by ID, or all of the user's notifications "
+            "as read (when 'all' is true and thread_id is omitted). Threads with new activity will "
+            "re-appear as unread later."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "thread_id": {"type": "string", "description": "Specific thread ID from gh_get_notifications. Omit when 'all' is true."},
+                "all": {"type": "boolean", "default": False, "description": "Mark every unread notification as read. Mutually exclusive with thread_id."},
+            },
+            "required": [],
+        },
+    ),
+    Tool(
+        name="gh_push_commits",
+        description=(
+            "Push the local branch in a git working tree to the remote, using the user's GitHub PAT "
+            "for HTTPS authentication. Assumes commits have already been authored locally (this tool "
+            "does NOT create commits). Requires the repo_path to be an actual git working tree on "
+            "the Odysseus host (i.e. won't work from a chat agent on a machine without local clones). "
+            "When force=true, uses --force-with-lease (safer than raw --force — refuses if the "
+            "remote ref advanced since you last fetched). "
+            "ON LEASE REJECTION (`(stale info)` in output): do NOT silently retry with force=true. "
+            "Instead: shell-fetch the remote, inspect what changed on YOUR branch (git log "
+            "origin/<branch>..HEAD and HEAD..origin/<branch>), then decide. If the remote changes "
+            "are unrelated or you understand them, re-push. If they're real conflicting work, tell "
+            "the user before doing anything destructive. "
+            "ON SECRET SCAN BLOCK (response has `blocked: 'secret_scan'`): the diff contains "
+            "likely credentials. Do NOT try to bypass this tool — there's no bypass flag, and "
+            "trying alternative paths would defeat the protection. Tell the user clearly: which "
+            "files/lines flagged, that the gate is intentional, and that they should remove the "
+            "content from the diff (e.g. `git reset --soft HEAD~N` to unstage, edit the file, "
+            "re-commit) before retrying. If they insist it's a false positive, they can push "
+            "manually via the terminal — but make them confirm it explicitly first."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "repo_path": {"type": "string", "description": "Absolute filesystem path to the local git working tree."},
+                "branch": {"type": "string", "description": "Branch to push. Defaults to the current branch in the working tree."},
+                "remote": {"type": "string", "default": "origin"},
+                "force": {"type": "boolean", "default": False, "description": "Use --force-with-lease. Required for rebased branches; otherwise GitHub will reject."},
+                "set_upstream": {"type": "boolean", "default": True, "description": "Pass -u so the local branch tracks the remote (no-op on already-tracked branches)."},
+            },
+            "required": ["repo_path"],
+        },
+    ),
 ]
 
 
@@ -442,7 +607,390 @@ async def _dispatch(name: str, args: dict) -> Any:
         out = await _gh_request("GET", "/notifications", params=params)
         return {"count": len(out or []), "notifications": [_trim_notification(n) for n in (out or [])]}
 
+    # ── WRITE TOOLS ──
+
+    if name == "gh_post_pr_comment" or name == "gh_post_issue_comment":
+        # Same endpoint either way — GitHub treats PRs as issues for the
+        # general comment thread. The split tool names are purely for
+        # clarity in chat logs / agent decision-making.
+        owner, repo, number = args["owner"], args["repo"], args["number"]
+        body = args["body"]
+        out = await _gh_request(
+            "POST",
+            f"/repos/{owner}/{repo}/issues/{number}/comments",
+            json_body={"body": body},
+        )
+        return {
+            "id": (out or {}).get("id"),
+            "url": (out or {}).get("html_url"),
+            "created_at": (out or {}).get("created_at"),
+        }
+
+    if name == "gh_open_pr":
+        owner, repo = args["owner"], args["repo"]
+        body = {
+            "title": args["title"],
+            "head": args["head"],
+            "base": args["base"],
+        }
+        # Optional fields — only include if the agent passed them, so we
+        # don't accidentally clobber GitHub defaults with empty strings.
+        if "body" in args and args["body"] is not None:
+            body["body"] = args["body"]
+        if args.get("draft"):
+            body["draft"] = True
+        out = await _gh_request("POST", f"/repos/{owner}/{repo}/pulls", json_body=body)
+        return _trim_pr(out or {})
+
+    if name == "gh_edit_pr":
+        owner, repo, number = args["owner"], args["repo"], args["number"]
+        # Build a partial PATCH body — only fields the agent explicitly
+        # specified. PATCH semantics: omitted fields stay as-is.
+        body: dict = {}
+        for f in ("title", "body", "state", "base"):
+            if f in args and args[f] is not None:
+                body[f] = args[f]
+        if not body:
+            return {"error": "Nothing to update — pass at least one of: title, body, state, base."}
+        out = await _gh_request("PATCH", f"/repos/{owner}/{repo}/pulls/{number}", json_body=body)
+        return _trim_pr(out or {})
+
+    if name == "gh_close_issue":
+        owner, repo, number = args["owner"], args["repo"], args["number"]
+        reason = args.get("state_reason") or "completed"
+        out = await _gh_request(
+            "PATCH",
+            f"/repos/{owner}/{repo}/issues/{number}",
+            json_body={"state": "closed", "state_reason": reason},
+        )
+        return {
+            "number": (out or {}).get("number"),
+            "state": (out or {}).get("state"),
+            "state_reason": (out or {}).get("state_reason"),
+            "url": (out or {}).get("html_url"),
+        }
+
+    if name == "gh_mark_notification_read":
+        thread_id = args.get("thread_id")
+        if thread_id:
+            # Single thread: PATCH /notifications/threads/{id}
+            await _gh_request("PATCH", f"/notifications/threads/{thread_id}")
+            return {"marked": "one", "thread_id": thread_id}
+        if args.get("all"):
+            # Bulk mark-all-read: PUT /notifications with empty body
+            # (last_read_at defaults to now if omitted).
+            await _gh_request("PUT", "/notifications", json_body={})
+            return {"marked": "all"}
+        return {"error": "Pass thread_id (single) or all=true (bulk)."}
+
+    if name == "gh_push_commits":
+        return await _git_push_subprocess(args)
+
     raise RuntimeError(f"Unknown tool: {name}")
+
+
+# ── Pre-push secret scan ──
+# Hard gate against the single most catastrophic mistake an agent can make
+# on the user's behalf: pushing a commit that contains credentials. Once a
+# secret reaches a public-or-shared remote, it's burned — rotation is the
+# only fix, and the original commit lives forever in the git history,
+# clone caches, and (for popular repos) third-party mirrors and search
+# indexes that crawl GitHub. Briefing-level "be careful" isn't sufficient
+# protection for an outcome that has no undo. So this scan runs on the
+# diff that's about to leave the local machine, BEFORE the network push.
+#
+# Threat model assumed: an agent that knows what it's doing but can still
+# make mistakes (commits a .env file, leaves a debug-printed token in a
+# fixture, etc.). NOT a malicious agent trying to bypass — those can just
+# run git push directly via the shell tool. This is "save the user from
+# their assistant's accidental honesty", not "sandbox the assistant".
+#
+# Fail-open on scan errors: if the scan itself crashes or git refuses
+# to diff for some reason, we proceed with the push. The alternative
+# (block every push when the scanner has a bug) would be a worse UX
+# failure than the original problem.
+
+# Regex patterns for the specific credential formats we can detect with
+# high confidence (low false-positive rate). Generic high-entropy detection
+# is deliberately excluded — too many legit false positives in test
+# fixtures, hashes, base64-encoded assets, etc. Better to miss a
+# bespoke-format secret than to cry-wolf on every push.
+_SECRET_PATTERNS = {
+    "AWS Access Key ID": re.compile(r"AKIA[0-9A-Z]{16}"),
+    "GitHub Classic PAT": re.compile(r"ghp_[0-9A-Za-z]{36}"),
+    "GitHub Fine-grained PAT": re.compile(r"github_pat_[0-9A-Za-z_]{82}"),
+    "GitHub OAuth Token": re.compile(r"gho_[0-9A-Za-z]{36}"),
+    "OpenAI API Key (legacy)": re.compile(r"sk-[A-Za-z0-9]{48}(?![A-Za-z0-9])"),
+    "OpenAI API Key (project)": re.compile(r"sk-proj-[A-Za-z0-9_-]{40,}"),
+    "Anthropic API Key": re.compile(r"sk-ant-api[0-9]{2}-[A-Za-z0-9_-]{80,}"),
+    "Google API Key": re.compile(r"AIza[0-9A-Za-z_-]{35}"),
+    "Stripe Live Secret Key": re.compile(r"sk_live_[0-9a-zA-Z]{24,}"),
+    "Slack Token": re.compile(r"xox[baprs]-[0-9a-zA-Z-]{10,}"),
+    "Private Key Block (PEM)": re.compile(r"-----BEGIN[ A-Z]+PRIVATE KEY-----"),
+    "JWT-like Token": re.compile(r"eyJ[A-Za-z0-9_-]{20,}\.eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]+"),
+}
+
+# Filenames that almost always contain secrets when committed. We flag any
+# diff that ADDS one of these (as opposed to deleting — pulling a .env out
+# of git is the safe direction). Match is on the basename, case-insensitive,
+# with glob-style wildcards.
+_SENSITIVE_FILENAME_PATTERNS = [
+    re.compile(r"^\.env(\..+)?$", re.I),         # .env, .env.local, .env.production
+    re.compile(r".*credentials.*\.(json|yaml|yml|txt)$", re.I),
+    re.compile(r".*secrets?.*\.(json|yaml|yml|txt)$", re.I),
+    re.compile(r".*\.pem$", re.I),
+    re.compile(r".*\.key$", re.I),
+    re.compile(r"id_rsa$|id_ed25519$|id_ecdsa$|id_dsa$", re.I),  # SSH private keys
+    re.compile(r".*\.pfx$|.*\.p12$", re.I),       # PKCS#12 bundles
+]
+
+
+def _scan_diff_for_secret_patterns(diff_text: str) -> list[dict]:
+    """Walk a unified diff and report regex matches on ADDED lines only.
+    Lines starting with '+' (but not '+++' which is a file header) are
+    additions; '-' lines are removals; everything else is context. We only
+    care about additions — removing a leaked secret from a file is the
+    cleanup direction, not the leak."""
+    findings: list[dict] = []
+    current_file = None
+    for raw in diff_text.splitlines():
+        # Track which file we're in for nicer error reports.
+        if raw.startswith("+++ b/"):
+            current_file = raw[6:]
+            continue
+        if raw.startswith("+++") or raw.startswith("---"):
+            continue
+        if not raw.startswith("+"):
+            continue
+        content = raw[1:]
+        for label, pattern in _SECRET_PATTERNS.items():
+            m = pattern.search(content)
+            if m:
+                # Trim the snippet so it's recognizable but doesn't dump the
+                # whole secret into the agent's context (which would defeat
+                # the point — agent context goes to logs, logs leak).
+                snippet = content.strip()
+                if len(snippet) > 120:
+                    snippet = snippet[:60] + "..." + snippet[-30:]
+                # Mask the actual match in the snippet so we don't echo
+                # the secret back at the agent.
+                secret_text = m.group(0)
+                if len(secret_text) > 12:
+                    masked = secret_text[:4] + "*" * (len(secret_text) - 8) + secret_text[-4:]
+                else:
+                    masked = "*" * len(secret_text)
+                snippet = snippet.replace(secret_text, masked)
+                findings.append({
+                    "type": label,
+                    "file": current_file or "<unknown>",
+                    "snippet": snippet,
+                })
+    return findings
+
+
+def _scan_diff_for_sensitive_filenames(diff_text: str) -> list[dict]:
+    """Walk a unified diff and report any newly-added files whose names
+    match the sensitive-filename patterns. We detect 'add' vs 'delete' by
+    looking at the diff hunk markers ('--- /dev/null' means new file)."""
+    findings: list[dict] = []
+    # Split the diff into per-file sections. `diff --git a/X b/Y` is the
+    # standard section header from `git diff`.
+    sections = re.split(r"^diff --git ", diff_text, flags=re.MULTILINE)
+    for section in sections[1:]:
+        # The first line after "diff --git " is "a/path b/path"
+        header_line = section.split("\n", 1)[0]
+        m = re.match(r"a/(\S+) b/(\S+)", header_line)
+        if not m:
+            continue
+        path_b = m.group(2)
+        basename = path_b.rsplit("/", 1)[-1]
+        # Only flag NEW files — adding to existing files of these names
+        # might still be bad, but the cleanest signal is "this whole file
+        # shouldn't have been committed at all". `--- /dev/null` in the
+        # section is git's way of marking a new file.
+        if "--- /dev/null" not in section:
+            continue
+        for pat in _SENSITIVE_FILENAME_PATTERNS:
+            if pat.match(basename):
+                findings.append({
+                    "type": "Sensitive filename",
+                    "file": path_b,
+                    "snippet": f"new file: {basename}",
+                })
+                break  # one filename match is enough per file
+    return findings
+
+
+async def _pre_push_secret_scan(
+    repo_dir: Path, remote: str, branch: str, env: dict,
+) -> list[dict]:
+    """Compute the diff that's about to be pushed and scan it for secrets.
+
+    Strategy: diff between the remote tracking ref and local HEAD — that's
+    exactly what'll go over the wire. If the remote branch doesn't exist
+    yet (first push), fall back to scanning the local branch's last 20
+    commits' diffs as a best-effort. Returns a flat list of findings.
+
+    Fail-open on any scan error (returns []) so a scan bug never blocks
+    a legitimate push. The trade-off: a buggy scanner is invisible. A
+    blocking scanner would be a usability disaster on day 1."""
+    try:
+        # Try the precise diff: commits that exist locally but not on remote.
+        cmd = ["git", "-C", str(repo_dir), "log", "-p", "--no-color",
+               f"{remote}/{branch}..HEAD"]
+        proc = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=30)
+        if proc.returncode != 0 or not (proc.stdout or "").strip():
+            # Most likely: remote branch doesn't exist yet (fresh branch).
+            # Fall back to scanning the last 20 commits on the local branch.
+            cmd_fallback = ["git", "-C", str(repo_dir), "log", "-p", "--no-color",
+                            "--max-count=20", "HEAD"]
+            proc = subprocess.run(cmd_fallback, capture_output=True, text=True,
+                                  env=env, timeout=30)
+            if proc.returncode != 0:
+                return []
+        diff = proc.stdout or ""
+        findings = _scan_diff_for_secret_patterns(diff)
+        findings.extend(_scan_diff_for_sensitive_filenames(diff))
+        return findings
+    except Exception:
+        return []  # fail-open
+
+
+# ── Subprocess helper for gh_push_commits ──
+# Lives outside _dispatch because it's substantial enough to deserve
+# isolation + it's the only tool that doesn't hit the GitHub REST API
+# (it talks to GitHub via the git protocol over HTTPS instead).
+
+async def _git_push_subprocess(args: dict) -> dict:
+    """Push a local branch using the user's PAT as the HTTPS credential.
+
+    We inject GH_TOKEN and GITHUB_TOKEN into the subprocess env so any git
+    helper that reads them (e.g. `gh auth` or git-credential-manager) can
+    authenticate. The user's existing git remote URL (HTTPS or SSH)
+    determines the actual transport — for HTTPS remotes, git asks
+    git-credential-* which reads GITHUB_TOKEN; for SSH remotes, the token
+    is ignored and SSH agent is used (orthogonal).
+
+    Returns a structured result so the agent can both confirm success and
+    surface failure output to the user verbatim."""
+    repo_path = args.get("repo_path") or ""
+    if not repo_path:
+        return {"error": "repo_path is required."}
+    repo_dir = Path(repo_path).expanduser().resolve()
+    if not repo_dir.exists():
+        return {"error": f"Path does not exist: {repo_dir}"}
+    if not (repo_dir / ".git").exists():
+        return {"error": f"Not a git working tree (no .git): {repo_dir}"}
+
+    owner = _resolve_owner()
+    pat = _load_pat(owner or "") if owner else None
+    # We don't hard-require a PAT here — SSH remotes work without one. But
+    # log a hint if we don't have one so the agent can pre-warn the user
+    # if push fails with auth issues.
+    env = os.environ.copy()
+    if pat:
+        env["GH_TOKEN"] = pat
+        env["GITHUB_TOKEN"] = pat
+
+    remote = args.get("remote") or "origin"
+    branch = args.get("branch") or None  # None → resolved from working tree
+    set_upstream = args.get("set_upstream", True)
+    force = bool(args.get("force"))
+
+    # Resolve current branch if caller didn't specify one. Doing this in
+    # Python so error messages can be specific ("not on any branch" beats
+    # an opaque git push failure).
+    if not branch:
+        try:
+            proc = subprocess.run(
+                ["git", "-C", str(repo_dir), "rev-parse", "--abbrev-ref", "HEAD"],
+                capture_output=True, text=True, timeout=10,
+            )
+            branch = (proc.stdout or "").strip()
+            if not branch or branch == "HEAD":
+                return {"error": "Detached HEAD or could not resolve current branch — pass `branch` explicitly."}
+        except Exception as e:
+            return {"error": f"Failed to read current branch: {e}"}
+
+    # ── HARD GATE: pre-push secret scan ──
+    # Refuse to push if the diff that's about to go over the wire contains
+    # likely credentials. This is non-overridable from the tool side — the
+    # user who really needs to bypass can run `git push` manually in the
+    # terminal, which is a deliberate action requiring conscious effort.
+    # Tool-level refuse, no `bypass=true` flag, no per-pattern allowlist —
+    # because the agent invoking this with `bypass=true` would defeat the
+    # entire point. Briefing-level pleading isn't enough for a leak.
+    findings = await _pre_push_secret_scan(repo_dir, remote, branch, env)
+    if findings:
+        # Group findings by type so the error report is readable rather
+        # than a list of 30 individual matches when something like a
+        # private key spans multiple diff lines.
+        by_type: dict[str, list[dict]] = {}
+        for f in findings:
+            by_type.setdefault(f["type"], []).append(f)
+        return {
+            "ok": False,
+            "blocked": "secret_scan",
+            "error": (
+                "Refusing to push: the diff contains content that looks like "
+                "credentials or sensitive files. Once pushed to a remote, "
+                "secrets are effectively permanent (in history, in mirrors, "
+                "in clone caches) — rotating them is the only fix. Review the "
+                "findings below, remove the offending content from the diff "
+                "(use `git reset --soft HEAD~N` to unstage commits, edit, "
+                "re-commit), and try again."
+            ),
+            "findings": [
+                {
+                    "type": t,
+                    "occurrences": len(items),
+                    "files": list({i["file"] for i in items}),
+                    "first_match_snippet": items[0]["snippet"],
+                }
+                for t, items in by_type.items()
+            ],
+            "bypass_note": (
+                "There is no bypass flag on this tool. If you are confident "
+                "this is a false positive (e.g. a redacted example, a test "
+                "fixture, or a public demo token), you can push manually via "
+                "`git push` in the terminal — that requires deliberate human "
+                "action, which is the point."
+            ),
+        }
+
+    # Build the push command. Order matters for git: subcommand flags
+    # before positional args.
+    cmd = ["git", "-C", str(repo_dir), "push"]
+    if set_upstream:
+        cmd.append("-u")
+    if force:
+        # Always --force-with-lease, never raw --force. Lease checks that
+        # the remote ref hasn't advanced since we last fetched, preventing
+        # silent overwrite of someone else's push.
+        cmd.append("--force-with-lease")
+    cmd.extend([remote, branch])
+
+    try:
+        proc = subprocess.run(
+            cmd, capture_output=True, text=True, env=env, timeout=120,
+        )
+    except subprocess.TimeoutExpired:
+        return {"error": "git push timed out after 120s."}
+    except Exception as e:
+        return {"error": f"git push subprocess failed to start: {e}"}
+
+    # Git prints success info to stderr (the "remote: ..." lines and the
+    # final "branch -> branch" summary). Combine both streams for the
+    # agent's context — they're equally informative.
+    combined = (proc.stdout or "") + (proc.stderr or "")
+    return {
+        "ok": proc.returncode == 0,
+        "returncode": proc.returncode,
+        "branch": branch,
+        "remote": remote,
+        "force_with_lease": force,
+        "output": combined.strip(),
+    }
 
 
 async def run():

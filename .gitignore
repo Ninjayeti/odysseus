@@ -1,3 +1,7 @@
+# Local-only agent handoff notes (BUG reports, scratch files, etc.)
+BUG_*.md
+HANDOFF_*.md
+
 # Python
 __pycache__/
 *.pyc

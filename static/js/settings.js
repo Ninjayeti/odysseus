@@ -2137,26 +2137,42 @@ async function initGitHubIntegration() {
   const patBtn = el('gh-intg-save');
   const patMsg = el('gh-intg-pat-msg');
   const generateLink = el('gh-intg-generate-link');
+  const generateLinkRotate = el('gh-intg-generate-link-rotate');
+  const patInRotate = el('gh-intg-pat-rotate');
+  const patBtnRotate = el('gh-intg-save-rotate');
+  const patMsgRotate = el('gh-intg-pat-rotate-msg');
+  const setupBlock = el('gh-intg-setup');
+  const connectedBlock = el('gh-intg-connected-block');
+  const connectedUsername = el('gh-intg-connected-username');
+  const masterRow = el('gh-intg-master-row');
+  const enabledSw = el('gh-intg-enabled');
+  const masterStateText = el('gh-intg-master-state-text');
   // Pre-fill GitHub's classic-token creation URL with the scopes Odysseus
   // needs (repo for read+write on the user's own PRs/issues/diffs;
   // notifications so the agent can see what's new). User just clicks
   // "Generate token" at the bottom of the page they land on — no scope
   // hunting. We use classic over fine-grained because classic tokens
   // accept the scope list via URL param; fine-grained does not yet.
-  if (generateLink) {
+  // Both the setup-view link and the rotate-view link point at the same
+  // pre-filled URL — the only difference is when in the UX the user sees it.
+  const _ghTokenUrl = (() => {
     const _params = new URLSearchParams({
       description: 'Odysseus (https://github.com/pewdiepie-archdaemon/odysseus)',
       scopes: 'repo,notifications',
     });
-    generateLink.href = `https://github.com/settings/tokens/new?${_params.toString()}`;
-  }
+    return `https://github.com/settings/tokens/new?${_params.toString()}`;
+  })();
+  if (generateLink) generateLink.href = _ghTokenUrl;
+  if (generateLinkRotate) generateLinkRotate.href = _ghTokenUrl;
   const writeSw = el('gh-intg-write');
   const notifySw = el('gh-intg-notify');
   const briefingTa = el('gh-intg-briefing');
   const briefingSave = el('gh-intg-briefing-save');
   const briefingReset = el('gh-intg-briefing-reset');
   const briefingMsg = el('gh-intg-briefing-msg');
-  const disconnectSection = el('gh-intg-disconnect-section');
+  // (Legacy node gh-intg-disconnect-section kept in markup for backwards
+  // compat during hot-reload, but the disconnect button now lives in the
+  // new connected-view block. No JS reference needed.)
   const disconnectBtn = el('gh-intg-disconnect');
   const statusEl = el('gh-intg-status');
 
@@ -2174,31 +2190,55 @@ async function initGitHubIntegration() {
     if (!info) return;
     const tabBtn = el('gh-settings-tab-btn');
     const tabStatus = el('gh-tab-status');
-    const connectedPtr = el('gh-intg-connected-pointer');
     if (info.configured) {
-      statusEl.textContent = `Connected as ${info.github_username || '?'}`;
+      // Compact connected view — hide the setup spiel entirely.
+      const _isPaused = info.enabled === false;
+      // Header status: stay empty when the toggle row already says it all.
+      // Only stamp something when the user has paused the integration, so
+      // they can see at a glance that the card is "configured but off".
+      statusEl.textContent = _isPaused ? 'Paused' : '';
       if (tabStatus) tabStatus.textContent = `Connected as ${info.github_username || '?'}`;
-      patIn.placeholder = '••••••••  (replace to change)';
-      patIn.value = '';
-      disconnectSection.style.display = '';
+      if (connectedUsername) connectedUsername.textContent = `@${info.github_username || '?'}`;
+      if (masterStateText) masterStateText.textContent = _isPaused ? 'paused' : 'connected';
+      if (enabledSw) { enabledSw.checked = !_isPaused; enabledSw.disabled = false; }
+      if (masterRow) masterRow.classList.toggle('is-paused', _isPaused);
+      if (setupBlock) setupBlock.style.display = 'none';
+      if (connectedBlock) connectedBlock.style.display = '';
+      // Setup-view PAT field is hidden, but keep it cleared so a stale
+      // typed value doesn't leak in if the user later disconnects.
+      if (patIn) { patIn.value = ''; patIn.placeholder = 'github_pat_...'; }
       writeSw.checked = !!info.write_enabled;
-      writeSw.disabled = false;
+      // When paused, write/notify settings still exist server-side but
+      // they're moot until the user resumes — disable to make that clear.
+      writeSw.disabled = _isPaused;
       if (notifySw) {
         notifySw.checked = !!info.notify_enabled;
-        notifySw.disabled = false;
+        notifySw.disabled = _isPaused;
       }
+      // GitHub settings tab only exists when configured (even if paused —
+      // the user might pause specifically to edit settings without the
+      // agent picking up half-changed state). When NOT configured it's
+      // hidden because there's nothing to configure without a PAT.
       if (tabBtn) tabBtn.style.display = '';
-      if (connectedPtr) connectedPtr.style.display = '';
     } else {
+      // Full setup spiel — no token yet.
       statusEl.textContent = 'Not connected';
       if (tabStatus) tabStatus.textContent = '';
-      patIn.placeholder = 'ghp_...';
-      disconnectSection.style.display = 'none';
+      if (setupBlock) setupBlock.style.display = '';
+      if (connectedBlock) connectedBlock.style.display = 'none';
+      if (connectedUsername) connectedUsername.textContent = '';
+      if (enabledSw) { enabledSw.checked = false; enabledSw.disabled = true; }
+      if (masterRow) masterRow.classList.remove('is-paused');
+      if (patIn) patIn.placeholder = 'github_pat_...';
       writeSw.checked = false;
       writeSw.disabled = true;
       if (notifySw) { notifySw.checked = false; notifySw.disabled = true; }
       if (tabBtn) tabBtn.style.display = 'none';
-      if (connectedPtr) connectedPtr.style.display = 'none';
+      // If the rotate dropdown was left open from a previous configured
+      // session, collapse it so the next reconnect starts clean.
+      const rotate = el('gh-intg-rotate');
+      if (rotate) rotate.open = false;
+      if (patInRotate) patInRotate.value = '';
     }
     if (typeof info.briefing === 'string') {
       briefingTa.value = info.briefing;
@@ -2207,6 +2247,44 @@ async function initGitHubIntegration() {
     // briefing_unfilled flag, which checks for the (Fill in: ...) markers.
     const nudge = el('gh-intg-briefing-nudge');
     if (nudge) nudge.style.display = info.briefing_unfilled ? '' : 'none';
+  }
+
+  // Master enable/disable handler — POSTs the new `enabled` value to the
+  // existing /flags endpoint (which already accepts it). Side effects: chat-
+  // input GitHub toggle hides itself (via githubToggle.refresh which reads
+  // info.enabled), briefing injection skips, terminal env vars stop being
+  // set on new pty spawns. PAT stays stored.
+  if (enabledSw) {
+    enabledSw.addEventListener('change', async () => {
+      const turningOn = enabledSw.checked;
+      // Optimistic UI — flip the paused class immediately, then re-render
+      // from the server response so the canonical state always wins.
+      if (masterRow) masterRow.classList.toggle('is-paused', !turningOn);
+      if (masterStateText) masterStateText.textContent = turningOn ? 'connected' : 'paused';
+      try {
+        const r = await fetch('/api/github/integration/flags', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ enabled: turningOn }),
+        });
+        if (!r.ok) {
+          // Roll back the optimistic flip on server reject.
+          enabledSw.checked = !turningOn;
+          if (masterRow) masterRow.classList.toggle('is-paused', turningOn);
+          if (masterStateText) masterStateText.textContent = turningOn ? 'paused' : 'connected';
+          return;
+        }
+        // Re-render from the server response so write/notify get disabled
+        // (or re-enabled) to match the new paused state without a refresh.
+        const data = await r.json();
+        _render(data);
+        try { window.githubToggle && window.githubToggle.refresh && window.githubToggle.refresh(); } catch {}
+      } catch {
+        enabledSw.checked = !turningOn;
+        if (masterRow) masterRow.classList.toggle('is-paused', turningOn);
+      }
+    });
   }
 
   // Cross-links between the Integrations connection card and the dedicated
@@ -2242,11 +2320,12 @@ async function initGitHubIntegration() {
 
   // ── Action handlers ──
 
-  patBtn.addEventListener('click', async () => {
-    const pat = (patIn.value || '').trim();
-    if (!pat) { _flash(patMsg, 'Paste a PAT first.', 'err'); return; }
-    patBtn.disabled = true;
-    _flash(patMsg, 'Validating with GitHub…', null);
+  // Shared save logic — used by both initial-connect and rotate-token UX.
+  // Returns true on success so callers can perform follow-up UI updates.
+  async function _savePat(pat, inputEl, btnEl, msgEl) {
+    if (!pat) { _flash(msgEl, 'Paste a PAT first.', 'err'); return false; }
+    btnEl.disabled = true;
+    _flash(msgEl, 'Validating with GitHub…', null);
     try {
       const r = await fetch('/api/github/integration', {
         method: 'POST',
@@ -2256,18 +2335,41 @@ async function initGitHubIntegration() {
       });
       const data = await r.json();
       if (!r.ok) {
-        _flash(patMsg, data.detail || 'Save failed', 'err');
-        return;
+        _flash(msgEl, data.detail || 'Save failed', 'err');
+        return false;
       }
-      _flash(patMsg, `Connected as @${data.github_username}`, 'ok');
+      _flash(msgEl, `Connected as @${data.github_username}`, 'ok');
+      if (inputEl) inputEl.value = '';
       _render(data);
       try { if (window.githubToggle && window.githubToggle.refresh) window.githubToggle.refresh(); } catch {}
+      return true;
     } catch (e) {
-      _flash(patMsg, `Save failed: ${e.message || e}`, 'err');
+      _flash(msgEl, `Save failed: ${e.message || e}`, 'err');
+      return false;
     } finally {
-      patBtn.disabled = false;
+      btnEl.disabled = false;
     }
+  }
+
+  patBtn.addEventListener('click', () => {
+    _savePat((patIn.value || '').trim(), patIn, patBtn, patMsg);
   });
+
+  // Rotate-token handler — same endpoint, just lives in the connected view's
+  // "Manage token" dropdown. Server overwrites the encrypted PAT row in
+  // place, so there's no separate "rotate" API.
+  if (patBtnRotate) {
+    patBtnRotate.addEventListener('click', async () => {
+      const ok = await _savePat(
+        (patInRotate.value || '').trim(),
+        patInRotate, patBtnRotate, patMsgRotate,
+      );
+      if (ok) {
+        const rotate = el('gh-intg-rotate');
+        if (rotate) rotate.open = false;  // collapse after a successful swap
+      }
+    });
+  }
 
   writeSw.addEventListener('change', async (e) => {
     const turningOn = writeSw.checked;
