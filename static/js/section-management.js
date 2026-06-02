@@ -33,39 +33,53 @@ export function initSectionCollapse(Storage) {
       Storage.setJSON('section-collapsed', state);
 
       // Always clear any in-flight animation classes from a previous toggle
-      // so back-to-back clicks restart cleanly.
+      // so back-to-back clicks restart cleanly. Bump a generation token so
+      // any callback still pending from a superseded toggle becomes a no-op.
       section.classList.remove('section-just-expanded', 'section-just-collapsing');
+      const gen = (section._collapseGen = (section._collapseGen || 0) + 1);
 
       if (willCollapse) {
-        // Domino-out: play the fade/slide-down on .list-item children
-        // BEFORE actually adding .collapsed (which hides them via
-        // display:none). After the cascade finishes, lock in collapse.
-        const itemCount = Math.min(12, section.querySelectorAll('.list-item').length);
-        if (itemCount === 0) {
-          // No .list-item children means the section-domino-out CSS rule
-          // has nothing to target (e.g. #models-section uses .models-row).
-          // Skip the staged wait so the user doesn't see a dead pause
-          // before the section snaps shut.
+        // Domino-out: play the fade/slide-down on the row children BEFORE
+        // actually adding .collapsed (which hides them via display:none),
+        // then lock in collapse once the cascade finishes.
+        //
+        // We wait on the REAL animations (getAnimations) rather than a fixed
+        // timeout. Different sections animate different rows — .list-item in
+        // most, .models-row in #models-section — so any hard-coded duration
+        // either stalls with a dead pause (when the selector matches nothing,
+        // as it did for #models-section) or guesses the wrong length. Force a
+        // reflow first so the keyframes restart from the top.
+        // eslint-disable-next-line no-unused-expressions
+        section.offsetHeight;
+        section.classList.add('section-just-collapsing');
+
+        const lockCollapsed = () => {
+          if (section._collapseGen !== gen) return; // superseded by a newer toggle
+          section.classList.remove('section-just-collapsing');
           section.classList.add('collapsed');
+        };
+        // Only the domino-out keyframes gate the collapse — ignore unrelated
+        // (and possibly infinite, e.g. spinners) animations in the subtree.
+        const dominoOut = section.getAnimations({ subtree: true })
+          .filter(a => a.animationName === 'section-domino-out');
+        if (dominoOut.length === 0) {
+          lockCollapsed(); // nothing to animate — collapse now, no dead pause
         } else {
-          // Force reflow so the keyframes restart.
-          // eslint-disable-next-line no-unused-expressions
-          section.offsetHeight;
-          section.classList.add('section-just-collapsing');
-          const total = itemCount * 25 + 230; // matches CSS keyframes + stagger
-          setTimeout(() => {
-            section.classList.remove('section-just-collapsing');
-            section.classList.add('collapsed');
-          }, total);
+          Promise.allSettled(dominoOut.map(a => a.finished)).then(lockCollapsed);
+          // Safety net: if an animation never settles (e.g. element removed),
+          // still lock in the collapse so the section can't get stuck open.
+          setTimeout(lockCollapsed, 600);
         }
       } else {
-        // Expand path — already had this: remove .collapsed and replay
-        // the inbound domino.
+        // Expand path — remove .collapsed and replay the inbound domino.
         section.classList.remove('collapsed');
         // eslint-disable-next-line no-unused-expressions
         section.offsetHeight;
         section.classList.add('section-just-expanded');
-        setTimeout(() => section.classList.remove('section-just-expanded'), 700);
+        setTimeout(() => {
+          if (section._collapseGen !== gen) return; // superseded by a newer toggle
+          section.classList.remove('section-just-expanded');
+        }, 700);
       }
     }
 
