@@ -366,17 +366,15 @@ class TerminalManager:
             if base in ("bash", "zsh", "fish"):
                 argv = [shell, "-l"]
             elif base in ("pwsh.exe", "powershell.exe", "pwsh", "powershell"):
-                # Silence PSReadLine's audible bell at spawn. PSReadLine
-                # rings the bell via Console.Beep() — a Windows API call,
-                # not a stdout \x07 — so it bypasses the pty entirely and
-                # our server-side BEL stripper can't catch it. The bell
-                # fires on common interactive actions (backspace past line
-                # start, tab-complete with no matches, history nav at top).
+                # Silence PSReadLine's audible bell and disable predictive
+                # IntelliSense at spawn. The bell rings via Console.Beep()
+                # (bypasses pty), and PredictionSource renders ghost text
+                # that causes arrow/line artifacts when an agent types fast.
                 # -NoExit keeps the shell interactive after the command.
                 # -ErrorAction SilentlyContinue makes it a no-op if
                 # PSReadLine isn't loaded (very old Windows PowerShell).
                 argv = [shell, "-NoExit", "-Command",
-                        "Set-PSReadLineOption -BellStyle None -ErrorAction SilentlyContinue"]
+                        "Set-PSReadLineOption -BellStyle None -PredictionSource None -ErrorAction SilentlyContinue"]
             else:
                 argv = [shell]
             try:
@@ -417,10 +415,9 @@ class TerminalManager:
 
         base = os.path.basename(shell).lower()
         if base in ("pwsh.exe", "powershell.exe"):
-            # Same PSReadLine bell-mute as the pty path (Console.Beep bypasses
-            # the stream, so this is the only way to silence it).
+            # Same PSReadLine bell-mute + prediction-disable as the pty path.
             argv = [base, "-NoExit", "-Command",
-                    "Set-PSReadLineOption -BellStyle None -ErrorAction SilentlyContinue"]
+                    "Set-PSReadLineOption -BellStyle None -PredictionSource None -ErrorAction SilentlyContinue"]
         else:
             argv = [base]
 
